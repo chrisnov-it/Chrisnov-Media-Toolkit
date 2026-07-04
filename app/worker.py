@@ -43,6 +43,12 @@ class DownloadWorker(QThread):
                 self.finished_ok.emit(f"playlist:{n}:{info.get('title', '?')}")
             else:
                 saved = ydl.prepare_filename(info)
+                if self.audio_only:
+                    # prepare_filename returns the pre-conversion extension (e.g.
+                    # ".webm"), but FFmpegExtractAudio writes the final file with
+                    # the chosen container extension.  Correct it here so the
+                    # caller can find the actual file on disk for rename/cleanup.
+                    saved = str(Path(saved).with_suffix(f".{self.container}"))
                 self.finished_ok.emit(saved)
         except Exception as e:
             self.failed.emit(str(e))
@@ -72,10 +78,12 @@ class DownloadWorker(QThread):
 
         if self.audio_only:
             codec = {"mp3": "mp3", "m4a": "aac", "opus": "opus"}.get(self.container, "mp3")
-            ext = self.container
             opts.update({
                 "format": "ba/b",
-                "outtmpl": str(Path(self.outdir) / f"%(title)s.{ext}"),
+                # Use %(ext)s — FFmpegExtractAudio rewrites the extension after
+                # conversion, so hardcoding it here causes a double extension
+                # (e.g. "title.m4a.m4a").
+                "outtmpl": str(Path(self.outdir) / "%(title)s.%(ext)s"),
                 "postprocessors": [{
                     "key": "FFmpegExtractAudio",
                     "preferredcodec": codec,
