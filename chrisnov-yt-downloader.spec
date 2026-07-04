@@ -1,0 +1,72 @@
+# -*- mode: python ; coding: utf-8 -*-
+#
+# PyInstaller spec for Chrisnov YT Downloader
+# Build on Linux  : .venv/bin/pyinstaller chrisnov-yt-downloader.spec
+# Build on Windows: .venv\Scripts\pyinstaller chrisnov-yt-downloader.spec
+
+import sys
+from pathlib import Path
+
+block_cipher = None
+
+a = Analysis(
+    ['main.py'],
+    pathex=[],
+    binaries=[],
+    datas=[
+        # Bundle the SVG icon so it's available at runtime inside the package
+        ('icon.svg', '.'),
+    ],
+    hiddenimports=[
+        # yt-dlp extractor plugins are loaded dynamically — tell PyInstaller about them
+        'yt_dlp.extractor',
+        'yt_dlp.postprocessor',
+        # PySide6 platform plugins
+        'PySide6.QtSvg',
+        'PySide6.QtSvgWidgets',
+    ],
+    hookspath=[],
+    hooksconfig={},
+    runtime_hooks=[],
+    excludes=[
+        # Trim unused Qt modules to reduce binary size
+        'PySide6.QtWebEngineWidgets',
+        'PySide6.QtWebEngineCore',
+        'PySide6.QtWebChannel',
+        'PySide6.QtMultimedia',
+        'PySide6.Qt3DCore',
+        'PySide6.Qt3DRender',
+        'PySide6.QtCharts',
+        'PySide6.QtDataVisualization',
+    ],
+    win_no_prefer_redirects=False,
+    win_private_assemblies=False,
+    cipher=block_cipher,
+    noarchive=False,
+)
+
+pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
+
+exe = EXE(
+    pyz,
+    a.scripts,
+    a.binaries,
+    a.zipfiles,
+    a.datas,
+    [],
+    name='chrisnov-yt-downloader',
+    debug=False,
+    bootloader_ignore_signals=False,
+    strip=False,
+    upx=True,           # compress with UPX if available (reduces size ~30%)
+    upx_exclude=[],
+    runtime_tmpdir=None,
+    console=False,      # no black terminal window on Windows
+    disable_windowed_traceback=False,
+    target_arch=None,
+    codesign_identity=None,
+    entitlements_file=None,
+    # Windows: embed the SVG as app icon (PyInstaller converts it automatically
+    # if Pillow is installed; otherwise use an .ico file here instead)
+    icon='icon.svg' if sys.platform != 'win32' else None,
+)

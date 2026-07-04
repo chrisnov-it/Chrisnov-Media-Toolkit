@@ -1,45 +1,76 @@
 # Changelog
 
-## v1.0.0 (2026-07-04)
+All notable changes to this project are documented here.
 
-Initial release — Chrisnov YT Downloader.
+---
+
+## [Unreleased] — 2026-07-05
 
 ### Added
 
-- **Minimal PySide6 GUI** around yt-dlp. Paste a YouTube URL (or
-  any yt-dlp-supported site) and download.
-- **Audio-only mode** with selectable bitrate (96/128/160/192/256/320 kbps).
-  Container choice: mp3 / m4a / opus.
-- **Resolution presets:** Best (no limit) / 1080p / 720p / 480p / 360p.
-  Video containers: mp4 / mkv / webm (auto‑merge via ffmpeg).
-- **Title cleanup checkbox** — strips "Official Music Video", "Official Video",
-  "Official Lyrics Video", "Music Video", "Lyric Video", "Lyrics Video",
-  "Official Audio", "Audio", "Topic" from filenames.
-    - Handles bare words, `[bracketed]`, `(parenthesised)`, dash/pipe separators.
-    - Editable tag list (comma‑separated) in the GUI.
-    - Runs after download; status bar shows `"Cleaned N file(s), ..."` when
-      active.
-- **Batch queue** — add URLs one by one or drop a text file. Queue runs
-  sequentially. Remove selected / Clear buttons.
-- **Playlist support** — auto‑detected via `&list=` or `?list=` in the URL.
-  Uses yt-dlp's playlist expansion. Large playlists (≥50 entries) run a dry
-  fetch to count and show a confirmation dialog with estimated size.
-- **Skip duplicates** — yt‑dlp `download_archive` stores a history of downloaded
-  IDs at `~/.config/chrisnov-yt-downloader/archive_audio.txt` (or
-  `archive_video.txt`). Re‑queuing a previously downloaded entry skips it
-  automatically. Delete the archive file to re‑download from scratch.
-- **Drag‑and‑drop** — drop a URL (plain text), a browser link, or a `.txt` file
-  of URLs onto the window.
-- **Cancel mid‑batch** — terminates the current worker; queue state is
-  preserved.
-- **App icon** — custom SVG icon (`icon.svg`). Rendered to QIcon via
-  QSvgRenderer + QPixmap for consistent display on Linux and Windows.
-  Windows taskbar icon set via AppUserModelID.
-- **Modular project layout:** `app/constants.py`, `app/cleaner.py`,
-  `app/worker.py` (QThread), `app/window.py` (MainWindow), `app/icon.py`.
-- **Cross‑platform:** Python 3.12+, PySide6, yt‑dlp, and ffmpeg only. Runs
-  unchanged on Linux Mint and Windows 11.
+- **Audio/Video Converter tab** (`app/converter_worker.py` + `app/window.py`)
+  New "🔄 Converter" tab alongside the existing Downloader tab. Supports:
+  - Batch file queue with drag-and-drop (audio and video input)
+  - Video-to-audio extraction (strips video stream via `-vn`)
+  - Output formats: mp3, m4a (AAC-LC), opus, flac, wav
+  - CBR / VBR mode for lossy formats (mp3, m4a); opus always VBR
+  - Bitrate selector (96–320 kbps)
+  - Sample rate conversion: As-is / 44100 / 48000 / 96000 Hz
+  - EBU R128 loudness normalization (2-pass, adjustable LUFS target)
+  - Peak normalization (dynaudnorm + volume filter)
+  - Trim silence (leading + trailing, via silenceremove + areverse trick)
+  - Shared Clean title setting from the Downloader tab
+  - Output folder with Browse, auto-rename on collision
 
-### Installation
 
-See `README.md` → Setup (Linux Mint or Windows 11 instructions).
+### Fixed
+
+- **Double file extension on audio-only downloads** (`song.m4a.m4a`)
+  `outtmpl` for audio-only mode was hardcoding the container extension
+  (e.g. `%(title)s.m4a`). `FFmpegExtractAudio` then appended its own
+  extension after conversion, producing a double suffix. Fixed by using
+  `%(title)s.%(ext)s` and letting yt-dlp manage the extension.
+
+- **Clean title not applied to audio-only files**
+  `worker.run()` emitted the path from `prepare_filename()`, which returns
+  the pre-conversion extension (e.g. `.webm`). `rename_with_cleanup` looked
+  for a `.webm` file that no longer existed on disk and silently skipped the
+  rename. Fixed by replacing the extension with the chosen container
+  (`.mp3`, `.m4a`, `.opus`) before emitting `finished_ok`.
+
+- **Clean title regex leaving behind unclosed brackets**
+  `clean_title()` matched fully-bracketed tags `(tag)` / `[tag]` but failed
+  on titles where the closing bracket was missing, e.g. `Song (Official Music
+  Video`. Added passes for unclosed brackets at end-of-string and mid-string,
+  plus a final sweep to remove dangling bracket characters.
+
+- **`AttributeError: 'MainWindow' object has no attribute 'batch_done'`**
+  `batch_done` was only initialised inside `_on_item_ok`, so if the very first
+  item in a batch failed, `_kick_next` crashed trying to reference it. Fixed
+  by initialising `batch_done = 0` alongside `batch_idx` and `batch_total` in
+  `_start_download`, and replacing the fragile `getattr` fallback with a direct
+  `+= 1`.
+
+### Added
+
+- **Smart output folder auto-switch**
+  Checking "Audio only" now automatically switches the output folder to
+  `~/Music`; unchecking switches back to `~/Videos`. The switch only happens
+  if the folder is still on the default path — a manually chosen folder is
+  never overwritten.
+
+- **Expanded default Clean Title tag list**
+  Added common Indonesian tags (`Video Lirik`, `Lirik Video`, `Lirik Lagu`,
+  `Lirik`, `Video Klip`, `Musik Video`, `Audio Visual`, `Lagu Resmi`, `Resmi`,
+  `Versi Akustik`, `Live`) and additional English tags (`Official Live Video`,
+  `Official Visualizer`, `Official Acoustic`, `Acoustic Version`,
+  `Live Performance`, `Live Session`, `Full Album`, `Album Stream`,
+  `Visualizer`, `HD`, `HQ`, `4K`, `MV`).
+
+### Changed
+
+- **Queue auto-clears after batch completes**
+  Previously the download queue (URL list + `current_batch`) was not cleared
+  after a batch finished, causing old URLs to be re-downloaded on the next
+  Start. `_reset_after_batch` now clears both the list widget and the internal
+  batch list. This also applies after Cancel.
