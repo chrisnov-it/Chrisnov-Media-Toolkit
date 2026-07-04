@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+
+# Virtual environments
+.venv/
+venv/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Archive (user data, but no sense commiting)
+archive_*.txt
+
+# Misc
+.pytest_cache/
+*.egg-info/
+*.bak
