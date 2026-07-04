@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1a1a2e"/>
+      <stop offset="100%" stop-color="#16213e"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#e94560"/>
+      <stop offset="100%" stop-color="#c62e4e"/>
+    </linearGradient>
+    <linearGradient id="btn" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="100%" stop-color="#e0e0e0"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Rounded rectangle background -->
+  <rect x="32" y="32" width="448" height="448" rx="80" ry="80" fill="url(#bg)"/>
+
+  <!-- Play button triangle -->
+  <polygon points="180,140 180,372 380,256" fill="url(#accent)"/>
+
+  <!-- Downward arrow on the button -->
+  <g transform="translate(256,380)">
+    <path d="M-24,0 L24,0 L0,28 Z" fill="url(#btn)"/>
+    <rect x="-3" y="-36" width="6" height="36" rx="3" fill="url(#btn)"/>
+  </g>
+
+  <!-- Stylish "C" monogram at the bottom-right -->
+  <text x="400" y="460" font-family="sans-serif" font-weight="bold" font-size="64" fill="#e94560" opacity="0.6">C</text>
+</svg>
