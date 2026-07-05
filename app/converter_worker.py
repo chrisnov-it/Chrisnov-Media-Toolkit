@@ -1,4 +1,4 @@
-"""FFmpeg-based audio/video-to-audio converter worker (QThread)."""
+"""FFmpeg-based media converter workers (QThread)."""
 
 from __future__ import annotations
 
@@ -23,6 +23,18 @@ SUPPORTED_INPUT_EXTENSIONS = {
 }
 
 OUTPUT_FORMATS = ["mp3", "m4a", "opus", "flac", "wav"]
+
+VIDEO_INPUT_EXTENSIONS = {
+    "mp4", "mkv", "webm", "avi", "mov", "wmv", "flv", "ts", "m4v",
+}
+
+VIDEO_OUTPUT_FORMATS = ["mp4", "mkv", "webm"]
+
+VIDEO_QUALITY_PRESETS = [
+    ("Keep quality", "keep"),
+    ("Balanced", "balanced"),
+    ("Smaller file", "small"),
+]
 
 SAMPLE_RATES = [
     ("As-is (no change)", None),
@@ -315,6 +327,117 @@ class ConvertWorker(QThread):
     def _exec(self, cmd: list[str]) -> None:
         """Run ffmpeg command, raise RuntimeError on non-zero exit."""
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+        if result.returncode != 0:
+            raise RuntimeError(
+                f"ffmpeg error (exit {result.returncode}):\n{result.stderr[-800:]}"
+            )
+
+
+class VideoConvertWorker(QThread):
+    """Convert a single video file using ffmpeg."""
+
+    progress = Signal(int)
+    status = Signal(str)
+    finished_ok = Signal(str)
+    failed = Signal(str)
+
+    def __init__(
+        self,
+        src: str | Path,
+        outdir: str | Path,
+        fmt: str,
+        *,
+        quality: str = "balanced",
+        copy_audio: bool = True,
+        clean_tags: list[str] | None = None,
+        idx_label: str = "",
+    ):
+        super().__init__()
+        self.src = Path(src)
+        self.outdir = Path(outdir)
+        self.fmt = fmt
+        self.quality = quality
+        self.copy_audio = copy_audio
+        self.clean_tags = clean_tags
+        self.idx_label = idx_label
+
+    def run(self) -> None:
+        try:
+            ffmpeg = find_ffmpeg()
+            out_path = self._resolve_output_path()
+            cmd = self._build_cmd(ffmpeg, out_path)
+            self.status.emit(f"{self.idx_label} Converting {self.src.name}...")
+            self.progress.emit(10)
+            try:
+                self._exec(cmd)
+            except RuntimeError:
+                if not self.copy_audio:
+                    raise
+                self.status.emit(
+                    f"{self.idx_label} Audio stream incompatible, retrying with AAC/Opus..."
+                )
+                self.copy_audio = False
+                self._exec(self._build_cmd(ffmpeg, out_path))
+
+            if self.clean_tags:
+                from .cleaner import rename_with_cleanup
+                new = rename_with_cleanup(out_path, self.clean_tags)
+                if new:
+                    out_path = new
+
+            self.progress.emit(100)
+            self.finished_ok.emit(str(out_path))
+        except Exception as exc:
+            self.failed.emit(str(exc))
+
+    def _resolve_output_path(self) -> Path:
+        if self.clean_tags:
+            from .cleaner import clean_title
+            stem = clean_title(self.src.stem, self.clean_tags)
+        else:
+            stem = self.src.stem
+
+        base = self.outdir / f"{stem}.{self.fmt}"
+        if not base.exists():
+            return base
+        counter = 1
+        while True:
+            candidate = self.outdir / f"{stem} ({counter}).{self.fmt}"
+            if not candidate.exists():
+                return candidate
+            counter += 1
+
+    def _video_args(self) -> list[str]:
+        if self.fmt == "webm":
+            crf = {"keep": "20", "balanced": "30", "small": "36"}[self.quality]
+            return ["-c:v", "libvpx-vp9", "-crf", crf, "-b:v", "0", "-deadline", "good"]
+
+        crf = {"keep": "18", "balanced": "23", "small": "28"}[self.quality]
+        return [
+            "-c:v", "libx264",
+            "-preset", "medium",
+            "-crf", crf,
+            "-pix_fmt", "yuv420p",
+        ]
+
+    def _audio_args(self) -> list[str]:
+        if self.copy_audio and self.fmt != "webm":
+            return ["-c:a", "copy"]
+        if self.fmt == "webm":
+            return ["-c:a", "libopus", "-b:a", "128k"]
+        return ["-c:a", "aac", "-b:a", "160k"]
+
+    def _build_cmd(self, ffmpeg: str, out_path: Path) -> list[str]:
+        cmd = [ffmpeg, "-hide_banner", "-y", "-i", str(self.src)]
+        cmd += self._video_args()
+        cmd += self._audio_args()
+        if self.fmt == "mp4":
+            cmd += ["-movflags", "+faststart"]
+        cmd += [str(out_path)]
+        return cmd
+
+    def _exec(self, cmd: list[str]) -> None:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=1800)
         if result.returncode != 0:
             raise RuntimeError(
                 f"ffmpeg error (exit {result.returncode}):\n{result.stderr[-800:]}"

@@ -1,4 +1,4 @@
-"""GUI window for Chrisnov YT Downloader."""
+"""GUI window for Chrisnov Media Toolkit."""
 
 from __future__ import annotations
 
@@ -26,18 +26,22 @@ from .worker import DownloadWorker, audio_extensions, video_extensions
 from .converter_worker import (
     ConvertWorker, SUPPORTED_INPUT_EXTENSIONS, OUTPUT_FORMATS,
     AUDIO_BITRATES as CONV_BITRATES, SAMPLE_RATES, DEFAULT_LUFS,
+    VideoConvertWorker, VIDEO_INPUT_EXTENSIONS, VIDEO_OUTPUT_FORMATS,
+    VIDEO_QUALITY_PRESETS,
 )
 
 
 class MainWindow(QWidget):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Chrisnov YT Downloader")
+        self.setWindowTitle("Chrisnov Media Toolkit")
         self.setMinimumWidth(680)
         self.setAcceptDrops(True)
         self.current_batch: list[str] = []
         self._conv_files: list[Path] = []   # files queued for conversion
         self._conv_worker: ConvertWorker | None = None
+        self._video_conv_files: list[Path] = []
+        self._video_conv_worker: VideoConvertWorker | None = None
         self._build_ui()
 
     # ------------------------------------------------------------------ #
@@ -53,14 +57,36 @@ class MainWindow(QWidget):
         tab = self._tabs.currentIndex()
         md  = event.mimeData()
         if tab == 1:
-            # Converter tab — accept local files
+            # Audio converter tab — accept local files/folders
             if md.hasUrls():
                 added = 0
                 for url in md.urls():
                     local = url.toLocalFile()
                     if local:
-                        self._conv_add_file(Path(local))
-                        added += 1
+                        path = Path(local)
+                        if path.is_dir():
+                            added += self._conv_add_folder(path)
+                        else:
+                            before = len(self._conv_files)
+                            self._conv_add_file(path)
+                            added += int(len(self._conv_files) > before)
+                if added:
+                    event.acceptProposedAction()
+            return
+        if tab == 2:
+            # Video converter tab — accept local files/folders
+            if md.hasUrls():
+                added = 0
+                for url in md.urls():
+                    local = url.toLocalFile()
+                    if local:
+                        path = Path(local)
+                        if path.is_dir():
+                            added += self._video_conv_add_folder(path)
+                        else:
+                            before = len(self._video_conv_files)
+                            self._video_conv_add_file(path)
+                            added += int(len(self._video_conv_files) > before)
                 if added:
                     event.acceptProposedAction()
             return
@@ -95,7 +121,8 @@ class MainWindow(QWidget):
 
         self._tabs = QTabWidget()
         self._tabs.addTab(self._build_downloader_tab(), "⬇  Downloader")
-        self._tabs.addTab(self._build_converter_tab(),  "🔄  Converter")
+        self._tabs.addTab(self._build_converter_tab(),  "♫  Audio Converter")
+        self._tabs.addTab(self._build_video_converter_tab(), "▣  Video Converter")
         root.addWidget(self._tabs)
 
     # ------------------------------------------------------------------ #
@@ -227,13 +254,16 @@ class MainWindow(QWidget):
         root.addWidget(self.conv_file_list)
 
         fbtn_row = QHBoxLayout()
-        add_files_btn = QPushButton("Add files…")
+        add_files_btn = QPushButton("Add files...")
         add_files_btn.clicked.connect(self._conv_browse_files)
+        add_folder_btn = QPushButton("Add folder...")
+        add_folder_btn.clicked.connect(self._conv_browse_folder)
         self.conv_remove_btn = QPushButton("Remove selected")
         self.conv_remove_btn.clicked.connect(self._conv_remove_selected)
         self.conv_clear_btn = QPushButton("Clear list")
         self.conv_clear_btn.clicked.connect(self._conv_clear_files)
         fbtn_row.addWidget(add_files_btn)
+        fbtn_row.addWidget(add_folder_btn)
         fbtn_row.addWidget(self.conv_remove_btn)
         fbtn_row.addWidget(self.conv_clear_btn)
         fbtn_row.addStretch()
@@ -344,7 +374,7 @@ class MainWindow(QWidget):
         out_row.addWidget(QLabel("Output folder:"))
         self.conv_dir_input = QLineEdit(str(Path.home() / "Music"))
         out_row.addWidget(self.conv_dir_input, 1)
-        conv_browse_btn = QPushButton("Browse…")
+        conv_browse_btn = QPushButton("Browse...")
         conv_browse_btn.clicked.connect(self._conv_browse_dir)
         out_row.addWidget(conv_browse_btn)
         root.addLayout(out_row)
@@ -369,6 +399,86 @@ class MainWindow(QWidget):
 
         # Trigger format-change to set correct initial state
         self._on_conv_fmt_changed(self.conv_fmt_combo.currentText())
+
+        return w
+
+    # ------------------------------------------------------------------ #
+    #  Tab 3 — Video Converter                                             #
+    # ------------------------------------------------------------------ #
+
+    def _build_video_converter_tab(self) -> QWidget:
+        w = QWidget()
+        root = QVBoxLayout(w)
+
+        root.addWidget(QLabel("Videos to convert (drag-and-drop, Add files, or Add folder):"))
+        self.video_conv_file_list = QListWidget()
+        self.video_conv_file_list.setMaximumHeight(140)
+        self.video_conv_file_list.setSelectionMode(QAbstractItemView.ExtendedSelection)
+        root.addWidget(self.video_conv_file_list)
+
+        fbtn_row = QHBoxLayout()
+        add_files_btn = QPushButton("Add files...")
+        add_files_btn.clicked.connect(self._video_conv_browse_files)
+        add_folder_btn = QPushButton("Add folder...")
+        add_folder_btn.clicked.connect(self._video_conv_browse_folder)
+        self.video_conv_remove_btn = QPushButton("Remove selected")
+        self.video_conv_remove_btn.clicked.connect(self._video_conv_remove_selected)
+        self.video_conv_clear_btn = QPushButton("Clear list")
+        self.video_conv_clear_btn.clicked.connect(self._video_conv_clear_files)
+        fbtn_row.addWidget(add_files_btn)
+        fbtn_row.addWidget(add_folder_btn)
+        fbtn_row.addWidget(self.video_conv_remove_btn)
+        fbtn_row.addWidget(self.video_conv_clear_btn)
+        fbtn_row.addStretch()
+        root.addLayout(fbtn_row)
+
+        fmt_row = QHBoxLayout()
+        fmt_row.addWidget(QLabel("Output format:"))
+        self.video_conv_fmt_combo = QComboBox()
+        self.video_conv_fmt_combo.addItems(VIDEO_OUTPUT_FORMATS)
+        self.video_conv_fmt_combo.setCurrentText("mp4")
+        fmt_row.addWidget(self.video_conv_fmt_combo, 1)
+
+        fmt_row.addWidget(QLabel("Quality:"))
+        self.video_conv_quality_combo = QComboBox()
+        for label, value in VIDEO_QUALITY_PRESETS:
+            self.video_conv_quality_combo.addItem(label, value)
+        self.video_conv_quality_combo.setCurrentIndex(1)
+        fmt_row.addWidget(self.video_conv_quality_combo, 1)
+        root.addLayout(fmt_row)
+
+        self.video_conv_audio_copy_chk = QCheckBox("Keep original audio when possible")
+        self.video_conv_audio_copy_chk.setChecked(True)
+        root.addWidget(self.video_conv_audio_copy_chk)
+
+        self.video_conv_clean_chk = QCheckBox("Clean title (use same tags as Downloader tab)")
+        self.video_conv_clean_chk.setChecked(True)
+        root.addWidget(self.video_conv_clean_chk)
+
+        out_row = QHBoxLayout()
+        out_row.addWidget(QLabel("Output folder:"))
+        self.video_conv_dir_input = QLineEdit(str(Path.home() / "Videos"))
+        out_row.addWidget(self.video_conv_dir_input, 1)
+        browse_btn = QPushButton("Browse...")
+        browse_btn.clicked.connect(self._video_conv_browse_dir)
+        out_row.addWidget(browse_btn)
+        root.addLayout(out_row)
+
+        btn_row = QHBoxLayout()
+        self.video_conv_start_btn = QPushButton("Convert")
+        self.video_conv_start_btn.clicked.connect(self._video_conv_start)
+        self.video_conv_cancel_btn = QPushButton("Cancel")
+        self.video_conv_cancel_btn.clicked.connect(self._video_conv_cancel)
+        self.video_conv_cancel_btn.setEnabled(False)
+        btn_row.addWidget(self.video_conv_start_btn)
+        btn_row.addWidget(self.video_conv_cancel_btn)
+        root.addLayout(btn_row)
+
+        self.video_conv_progress = QProgressBar()
+        self.video_conv_progress.setRange(0, 100)
+        root.addWidget(self.video_conv_progress)
+        self.video_conv_status_label = QLabel("Ready.")
+        root.addWidget(self.video_conv_status_label)
 
         return w
 
@@ -657,6 +767,16 @@ class MainWindow(QWidget):
         self._conv_files.append(path)
         self.conv_file_list.addItem(QListWidgetItem(path.name))
 
+    def _conv_add_folder(self, folder: Path) -> int:
+        """Add supported audio/video files from a folder tree."""
+        added = 0
+        for path in sorted(p for p in folder.rglob("*") if p.is_file()):
+            before = len(self._conv_files)
+            self._conv_add_file(path)
+            added += int(len(self._conv_files) > before)
+        self.conv_status_label.setText(f"Added {added} file(s) from folder.")
+        return added
+
     def _conv_browse_files(self) -> None:
         exts = " ".join(f"*.{e}" for e in sorted(SUPPORTED_INPUT_EXTENSIONS))
         paths, _ = QFileDialog.getOpenFileNames(
@@ -666,6 +786,13 @@ class MainWindow(QWidget):
         )
         for p in paths:
             self._conv_add_file(Path(p))
+
+    def _conv_browse_folder(self) -> None:
+        folder = QFileDialog.getExistingDirectory(
+            self, "Select folder to scan", str(Path.home() / "Music")
+        )
+        if folder:
+            self._conv_add_folder(Path(folder))
 
     def _conv_remove_selected(self) -> None:
         for item in self.conv_file_list.selectedItems():
@@ -801,3 +928,148 @@ class MainWindow(QWidget):
         self.conv_start_btn.setEnabled(True)
         self.conv_cancel_btn.setEnabled(False)
         self._conv_worker = None
+
+    # ------------------------------------------------------------------ #
+    #  Video converter — file list helpers                                #
+    # ------------------------------------------------------------------ #
+
+    def _video_conv_add_file(self, path: Path) -> None:
+        if path in self._video_conv_files:
+            return
+        ext = path.suffix.lstrip(".").lower()
+        if ext not in VIDEO_INPUT_EXTENSIONS:
+            self.video_conv_status_label.setText(
+                f"Skipped (unsupported): {path.name}"
+            )
+            return
+        self._video_conv_files.append(path)
+        self.video_conv_file_list.addItem(QListWidgetItem(path.name))
+
+    def _video_conv_add_folder(self, folder: Path) -> int:
+        added = 0
+        for path in sorted(p for p in folder.rglob("*") if p.is_file()):
+            before = len(self._video_conv_files)
+            self._video_conv_add_file(path)
+            added += int(len(self._video_conv_files) > before)
+        self.video_conv_status_label.setText(f"Added {added} video file(s) from folder.")
+        return added
+
+    def _video_conv_browse_files(self) -> None:
+        exts = " ".join(f"*.{e}" for e in sorted(VIDEO_INPUT_EXTENSIONS))
+        paths, _ = QFileDialog.getOpenFileNames(
+            self, "Select video files",
+            str(Path.home() / "Videos"),
+            f"Video files ({exts});;All files (*)",
+        )
+        for p in paths:
+            self._video_conv_add_file(Path(p))
+
+    def _video_conv_browse_folder(self) -> None:
+        folder = QFileDialog.getExistingDirectory(
+            self, "Select folder to scan", str(Path.home() / "Videos")
+        )
+        if folder:
+            self._video_conv_add_folder(Path(folder))
+
+    def _video_conv_remove_selected(self) -> None:
+        for item in self.video_conv_file_list.selectedItems():
+            row = self.video_conv_file_list.row(item)
+            if 0 <= row < len(self._video_conv_files):
+                self._video_conv_files.pop(row)
+            self.video_conv_file_list.takeItem(row)
+
+    def _video_conv_clear_files(self) -> None:
+        self._video_conv_files.clear()
+        self.video_conv_file_list.clear()
+        self.video_conv_status_label.setText("File list cleared.")
+
+    def _video_conv_browse_dir(self) -> None:
+        d = QFileDialog.getExistingDirectory(
+            self, "Select output folder", self.video_conv_dir_input.text()
+        )
+        if d:
+            self.video_conv_dir_input.setText(d)
+
+    # ------------------------------------------------------------------ #
+    #  Video converter — conversion flow                                  #
+    # ------------------------------------------------------------------ #
+
+    def _video_conv_start(self) -> None:
+        if not self._video_conv_files:
+            QMessageBox.warning(self, "No files", "Add at least one video to convert.")
+            return
+        outdir = Path(self.video_conv_dir_input.text().strip())
+        if not outdir.is_dir():
+            QMessageBox.warning(self, "Bad folder", f"Folder does not exist: {outdir}")
+            return
+
+        self._video_conv_queue = list(self._video_conv_files)
+        self._video_conv_idx = 0
+        self._video_conv_total = len(self._video_conv_queue)
+        self._video_conv_done = 0
+
+        self.video_conv_start_btn.setEnabled(False)
+        self.video_conv_cancel_btn.setEnabled(True)
+        self._video_conv_kick_next()
+
+    def _video_conv_kick_next(self) -> None:
+        if self._video_conv_idx >= self._video_conv_total:
+            self.video_conv_status_label.setText(
+                f"Done: {self._video_conv_done}/{self._video_conv_total} converted."
+            )
+            self.video_conv_progress.setValue(0)
+            self._video_conv_reset()
+            return
+
+        src = self._video_conv_queue[self._video_conv_idx]
+        idx_label = f"[{self._video_conv_idx + 1}/{self._video_conv_total}]"
+        clean_tags = None
+        if self.video_conv_clean_chk.isChecked() and self.clean_chk.isChecked():
+            clean_tags = parse_tag_list(self.clean_tags_input.text())
+
+        self.video_conv_status_label.setText(f"{idx_label} Preparing {src.name}...")
+        self.video_conv_progress.setValue(0)
+
+        self._video_conv_worker = VideoConvertWorker(
+            src=src,
+            outdir=self.video_conv_dir_input.text().strip(),
+            fmt=self.video_conv_fmt_combo.currentText(),
+            quality=self.video_conv_quality_combo.currentData(),
+            copy_audio=self.video_conv_audio_copy_chk.isChecked(),
+            clean_tags=clean_tags,
+            idx_label=idx_label,
+        )
+        self._video_conv_worker.progress.connect(self.video_conv_progress.setValue)
+        self._video_conv_worker.status.connect(self.video_conv_status_label.setText)
+        self._video_conv_worker.finished_ok.connect(self._on_video_conv_ok)
+        self._video_conv_worker.failed.connect(self._on_video_conv_fail)
+        self._video_conv_worker.start()
+
+    def _on_video_conv_ok(self, out_path: str) -> None:
+        name = Path(out_path).name
+        self.video_conv_status_label.setText(
+            f"[{self._video_conv_idx + 1}/{self._video_conv_total}] Done -> {name}"
+        )
+        self._video_conv_idx += 1
+        self._video_conv_done += 1
+        self._video_conv_kick_next()
+
+    def _on_video_conv_fail(self, msg: str) -> None:
+        self.video_conv_status_label.setText(
+            f"[{self._video_conv_idx + 1}/{self._video_conv_total}] Error: {msg}"
+        )
+        self._video_conv_idx += 1
+        self._video_conv_kick_next()
+
+    def _video_conv_cancel(self) -> None:
+        if self._video_conv_worker and self._video_conv_worker.isRunning():
+            self._video_conv_worker.terminate()
+            self.video_conv_status_label.setText("Cancelled.")
+        self._video_conv_reset()
+
+    def _video_conv_reset(self) -> None:
+        self._video_conv_files.clear()
+        self.video_conv_file_list.clear()
+        self.video_conv_start_btn.setEnabled(True)
+        self.video_conv_cancel_btn.setEnabled(False)
+        self._video_conv_worker = None
