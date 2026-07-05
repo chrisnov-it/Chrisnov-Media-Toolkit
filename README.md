@@ -1,7 +1,8 @@
-# Chrisnov YT Downloader
+# Chrisnov Media Toolkit
 
-Minimal cross-platform GUI for `yt-dlp`, built with PySide6. Lightweight enough
-for low-spec laptops (tested on Intel i5-5200U / 7GB RAM / Intel HD 5500).
+Minimal cross-platform media downloader and converter built with PySide6,
+`yt-dlp`, and FFmpeg. Lightweight enough for low-spec laptops (tested on Intel
+i5-5200U / 7GB RAM / Intel HD 5500).
 
 ## Features
 
@@ -25,6 +26,11 @@ for low-spec laptops (tested on Intel i5-5200U / 7GB RAM / Intel HD 5500).
 - Live progress + speed (per item, e.g. "[2/5] Downloading...")
 - Cancel mid-batch
 - Queue clears automatically after each batch finishes
+- **Audio converter** — batch convert local audio/video files to mp3, m4a,
+  opus, flac, or wav
+- **Video converter** — batch convert local videos to mp4, mkv, or webm with
+  simple quality presets
+- **Add folder** — add supported media from a folder tree for batch conversion
 
 ## Building a standalone executable
 
@@ -144,7 +150,7 @@ Private use.
 ### Cara Pakai (Langkah Dasar)
 
 1. Buka aplikasi dengan menjalankan `main.py` (atau klik shortcut kalau sudah dibuat).
-   Jendela berlabel **Chrisnov YT Downloader** akan muncul.
+   Jendela berlabel **Chrisnov Media Toolkit** akan muncul.
 
 2. Buka YouTube (atau situs lain yang didukung) di browser, lalu salin link videonya
    (klik kanan pada video → *Copy video URL*, atau salin dari address bar).

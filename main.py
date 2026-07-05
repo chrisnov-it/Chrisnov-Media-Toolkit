@@ -1,4 +1,4 @@
-"""Chrisnov YT Downloader — entry point.
+"""Chrisnov Media Toolkit — entry point.
 
 A minimal PySide6 GUI wrapper around yt-dlp. See the README for features and setup.
 """
