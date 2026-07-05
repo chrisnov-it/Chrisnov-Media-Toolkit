@@ -6,8 +6,9 @@
 $ErrorActionPreference = "Stop"
 
 $venv  = ".venv"
-$spec  = "chrisnov-yt-downloader.spec"
-$out   = "dist\chrisnov-yt-downloader.exe"
+$spec  = "chrisnov-media-toolkit.spec"
+$out   = "dist\chrisnov-media-toolkit.exe"
+$icon  = "icon.ico"
 
 Write-Host "==> Checking venv..." -ForegroundColor Cyan
 if (-not (Test-Path "$venv\Scripts\python.exe")) {
@@ -20,10 +21,36 @@ if (-not (Test-Path "$venv\Scripts\python.exe")) {
 Write-Host "==> Installing / upgrading PyInstaller..." -ForegroundColor Cyan
 & "$venv\Scripts\pip.exe" install -q --upgrade pyinstaller
 
-# Optional: install Pillow so PyInstaller can convert icon.svg -> .ico automatically
-# Comment out if you supply a hand-crafted icon.ico instead.
-Write-Host "==> Installing Pillow (for icon conversion)..." -ForegroundColor Cyan
-& "$venv\Scripts\pip.exe" install -q --upgrade pillow
+if ((Test-Path "icon.svg") -and -not (Test-Path $icon)) {
+    Write-Host "==> Creating Windows icon..." -ForegroundColor Cyan
+    $oldQtPlatform = $env:QT_QPA_PLATFORM
+    $env:QT_QPA_PLATFORM = "offscreen"
+    $iconScript = @'
+import sys
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QGuiApplication, QImage, QPainter
+from PySide6.QtSvg import QSvgRenderer
+
+app = QGuiApplication(sys.argv)
+renderer = QSvgRenderer("icon.svg")
+image = QImage(256, 256, QImage.Format_ARGB32)
+image.fill(Qt.transparent)
+painter = QPainter(image)
+renderer.render(painter)
+painter.end()
+if not image.save("icon.ico", "ICO"):
+    raise SystemExit("Failed to save icon.ico")
+'@
+    try {
+        $iconScript | & "$venv\Scripts\python.exe" -
+    } finally {
+        $env:QT_QPA_PLATFORM = $oldQtPlatform
+    }
+}
+
+if (-not (Test-Path $icon)) {
+    Write-Host "==> icon.ico not found; Windows executable will use the default icon." -ForegroundColor Yellow
+}
 
 Write-Host "==> Cleaning previous build..." -ForegroundColor Cyan
 if (Test-Path "build") { Remove-Item -Recurse -Force "build" }
@@ -39,7 +66,7 @@ if (Test-Path $out) {
     Write-Host "  Output : $out"
     Write-Host ("  Size   : {0:N1} MB" -f $size)
     Write-Host ""
-    Write-Host "Test it by double-clicking dist\chrisnov-yt-downloader.exe"
+    Write-Host "Test it by double-clicking $out"
 } else {
     Write-Host "ERROR: Build failed — $out not found." -ForegroundColor Red
     exit 1

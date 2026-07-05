@@ -11,7 +11,8 @@ from PySide6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
     QPushButton, QComboBox, QFileDialog, QMessageBox, QProgressBar, QCheckBox,
     QListWidget, QListWidgetItem, QTabWidget, QGroupBox, QRadioButton,
-    QButtonGroup, QDoubleSpinBox, QSpinBox, QAbstractItemView,
+    QButtonGroup, QDoubleSpinBox, QSpinBox, QAbstractItemView, QScrollArea,
+    QSizePolicy,
 )
 from yt_dlp import YoutubeDL
 
@@ -35,7 +36,8 @@ class MainWindow(QWidget):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Chrisnov Media Toolkit")
-        self.setMinimumWidth(680)
+        self.setMinimumSize(820, 620)
+        self.resize(920, 700)
         self.setAcceptDrops(True)
         self.current_batch: list[str] = []
         self._conv_files: list[Path] = []   # files queued for conversion
@@ -116,14 +118,113 @@ class MainWindow(QWidget):
     # ------------------------------------------------------------------ #
 
     def _build_ui(self) -> None:
+        self._apply_style()
         root = QVBoxLayout(self)
-        root.setContentsMargins(8, 8, 8, 8)
+        root.setContentsMargins(14, 14, 14, 14)
+        root.setSpacing(10)
 
         self._tabs = QTabWidget()
-        self._tabs.addTab(self._build_downloader_tab(), "⬇  Downloader")
-        self._tabs.addTab(self._build_converter_tab(),  "♫  Audio Converter")
-        self._tabs.addTab(self._build_video_converter_tab(), "▣  Video Converter")
+        self._tabs.addTab(self._wrap_tab(self._build_downloader_tab()), "⬇  Downloader")
+        self._tabs.addTab(self._wrap_tab(self._build_converter_tab()), "♫  Audio Converter")
+        self._tabs.addTab(self._wrap_tab(self._build_video_converter_tab()), "▣  Video Converter")
         root.addWidget(self._tabs)
+
+    def _wrap_tab(self, widget: QWidget) -> QScrollArea:
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QScrollArea.NoFrame)
+        scroll.setWidget(widget)
+        return scroll
+
+    def _apply_style(self) -> None:
+        self.setStyleSheet("""
+            QWidget {
+                font-family: "Segoe UI", "Noto Sans", Arial, sans-serif;
+                font-size: 10.5pt;
+            }
+            QTabWidget::pane {
+                border: 1px solid #d7dce2;
+                border-radius: 8px;
+                background: #fbfcfd;
+            }
+            QTabBar::tab {
+                padding: 9px 16px;
+                margin-right: 4px;
+                border-top-left-radius: 7px;
+                border-top-right-radius: 7px;
+                background: #eef2f6;
+                color: #26313d;
+            }
+            QTabBar::tab:selected {
+                background: #ffffff;
+                border: 1px solid #d7dce2;
+                border-bottom-color: #ffffff;
+            }
+            QGroupBox {
+                border: 1px solid #d7dce2;
+                border-radius: 8px;
+                margin-top: 10px;
+                padding: 12px 10px 10px 10px;
+                font-weight: 600;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 10px;
+                padding: 0 4px;
+            }
+            QLineEdit, QComboBox, QListWidget, QDoubleSpinBox, QSpinBox {
+                min-height: 30px;
+                border: 1px solid #cbd3dc;
+                border-radius: 6px;
+                padding: 4px 8px;
+                background: #ffffff;
+            }
+            QPushButton {
+                min-height: 32px;
+                padding: 5px 12px;
+                border: 1px solid #b8c2cc;
+                border-radius: 6px;
+                background: #f5f7fa;
+            }
+            QPushButton:hover {
+                background: #edf2f7;
+            }
+            QPushButton:pressed {
+                background: #e2e8f0;
+            }
+            QPushButton:disabled {
+                color: #8a94a0;
+                background: #edf0f3;
+            }
+            QPushButton#primaryButton {
+                color: #ffffff;
+                border-color: #226ac7;
+                background: #2f80ed;
+                font-weight: 600;
+            }
+            QPushButton#primaryButton:hover {
+                background: #2a73d8;
+            }
+            QPushButton#dangerButton {
+                color: #a62929;
+                border-color: #e1b4b4;
+                background: #fff5f5;
+            }
+            QPushButton#dangerButton:hover {
+                background: #ffe8e8;
+            }
+            QProgressBar {
+                min-height: 16px;
+                border: 1px solid #cbd3dc;
+                border-radius: 8px;
+                text-align: center;
+                background: #eef2f6;
+            }
+            QProgressBar::chunk {
+                border-radius: 8px;
+                background: #2f80ed;
+            }
+        """)
 
     # ------------------------------------------------------------------ #
     #  Tab 1 — Downloader                                                  #
@@ -132,6 +233,8 @@ class MainWindow(QWidget):
     def _build_downloader_tab(self) -> QWidget:
         w = QWidget()
         root = QVBoxLayout(w)
+        root.setContentsMargins(14, 14, 14, 14)
+        root.setSpacing(10)
 
         # URL input
         root.addWidget(QLabel("Video URL (or drag a URL/text file here):"))
@@ -150,8 +253,9 @@ class MainWindow(QWidget):
         # Queue list
         root.addWidget(QLabel("Download queue:"))
         self.queue_list = QListWidget()
-        self.queue_list.setMaximumHeight(110)
-        root.addWidget(self.queue_list)
+        self.queue_list.setMinimumHeight(130)
+        self.queue_list.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        root.addWidget(self.queue_list, 1)
 
         qrow = QHBoxLayout()
         self.remove_btn = QPushButton("Remove selected")
@@ -221,8 +325,10 @@ class MainWindow(QWidget):
         # Start / Cancel
         row3 = QHBoxLayout()
         self.download_btn = QPushButton("Start (current OR queue)")
+        self.download_btn.setObjectName("primaryButton")
         self.download_btn.clicked.connect(self._start_download)
         self.cancel_btn = QPushButton("Cancel")
+        self.cancel_btn.setObjectName("dangerButton")
         self.cancel_btn.clicked.connect(self._cancel_download)
         self.cancel_btn.setEnabled(False)
         row3.addWidget(self.download_btn)
@@ -245,13 +351,16 @@ class MainWindow(QWidget):
     def _build_converter_tab(self) -> QWidget:
         w = QWidget()
         root = QVBoxLayout(w)
+        root.setContentsMargins(14, 14, 14, 14)
+        root.setSpacing(10)
 
         # File queue
         root.addWidget(QLabel("Files to convert (drag-and-drop or Browse):"))
         self.conv_file_list = QListWidget()
-        self.conv_file_list.setMaximumHeight(120)
+        self.conv_file_list.setMinimumHeight(150)
+        self.conv_file_list.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.conv_file_list.setSelectionMode(QAbstractItemView.ExtendedSelection)
-        root.addWidget(self.conv_file_list)
+        root.addWidget(self.conv_file_list, 1)
 
         fbtn_row = QHBoxLayout()
         add_files_btn = QPushButton("Add files...")
@@ -382,8 +491,10 @@ class MainWindow(QWidget):
         # Convert / Cancel
         btn_row = QHBoxLayout()
         self.conv_start_btn = QPushButton("Convert")
+        self.conv_start_btn.setObjectName("primaryButton")
         self.conv_start_btn.clicked.connect(self._conv_start)
         self.conv_cancel_btn = QPushButton("Cancel")
+        self.conv_cancel_btn.setObjectName("dangerButton")
         self.conv_cancel_btn.clicked.connect(self._conv_cancel)
         self.conv_cancel_btn.setEnabled(False)
         btn_row.addWidget(self.conv_start_btn)
@@ -409,12 +520,15 @@ class MainWindow(QWidget):
     def _build_video_converter_tab(self) -> QWidget:
         w = QWidget()
         root = QVBoxLayout(w)
+        root.setContentsMargins(14, 14, 14, 14)
+        root.setSpacing(10)
 
         root.addWidget(QLabel("Videos to convert (drag-and-drop, Add files, or Add folder):"))
         self.video_conv_file_list = QListWidget()
-        self.video_conv_file_list.setMaximumHeight(140)
+        self.video_conv_file_list.setMinimumHeight(170)
+        self.video_conv_file_list.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.video_conv_file_list.setSelectionMode(QAbstractItemView.ExtendedSelection)
-        root.addWidget(self.video_conv_file_list)
+        root.addWidget(self.video_conv_file_list, 1)
 
         fbtn_row = QHBoxLayout()
         add_files_btn = QPushButton("Add files...")
@@ -466,8 +580,10 @@ class MainWindow(QWidget):
 
         btn_row = QHBoxLayout()
         self.video_conv_start_btn = QPushButton("Convert")
+        self.video_conv_start_btn.setObjectName("primaryButton")
         self.video_conv_start_btn.clicked.connect(self._video_conv_start)
         self.video_conv_cancel_btn = QPushButton("Cancel")
+        self.video_conv_cancel_btn.setObjectName("dangerButton")
         self.video_conv_cancel_btn.clicked.connect(self._video_conv_cancel)
         self.video_conv_cancel_btn.setEnabled(False)
         btn_row.addWidget(self.video_conv_start_btn)
@@ -615,10 +731,16 @@ class MainWindow(QWidget):
         )
 
         if self.skip_dup_chk.isChecked():
-            archive_dir = Path.home() / ".config" / "chrisnov-yt-downloader"
+            archive_dir = Path.home() / ".config" / "chrisnov-media-toolkit"
             archive_dir.mkdir(parents=True, exist_ok=True)
             suffix = "_audio" if self.audio_only else "_video"
-            self.archive_path = str(archive_dir / f"archive{suffix}.txt")
+            archive_path = archive_dir / f"archive{suffix}.txt"
+            old_archive_path = (
+                Path.home() / ".config" / "chrisnov-yt-downloader" / f"archive{suffix}.txt"
+            )
+            if old_archive_path.exists() and not archive_path.exists():
+                archive_path.write_text(old_archive_path.read_text(encoding="utf-8"), encoding="utf-8")
+            self.archive_path = str(archive_path)
             self.status_label.setText(
                 f"Archive: {self.archive_path} — already-downloaded entries will be skipped."
             )
@@ -918,7 +1040,10 @@ class MainWindow(QWidget):
 
     def _conv_cancel(self) -> None:
         if self._conv_worker and self._conv_worker.isRunning():
-            self._conv_worker.terminate()
+            self._conv_worker.cancel()
+            if not self._conv_worker.wait(3000):
+                self._conv_worker.terminate()
+                self._conv_worker.wait(1000)
             self.conv_status_label.setText("Cancelled.")
         self._conv_reset()
 
@@ -1063,7 +1188,10 @@ class MainWindow(QWidget):
 
     def _video_conv_cancel(self) -> None:
         if self._video_conv_worker and self._video_conv_worker.isRunning():
-            self._video_conv_worker.terminate()
+            self._video_conv_worker.cancel()
+            if not self._video_conv_worker.wait(3000):
+                self._video_conv_worker.terminate()
+                self._video_conv_worker.wait(1000)
             self.video_conv_status_label.setText("Cancelled.")
         self._video_conv_reset()
 

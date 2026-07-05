@@ -5,8 +5,8 @@
 set -e
 
 VENV=".venv"
-SPEC="chrisnov-yt-downloader.spec"
-OUT="dist/chrisnov-yt-downloader"
+SPEC="chrisnov-media-toolkit.spec"
+OUT="dist/chrisnov-media-toolkit"
 
 echo "==> Checking venv..."
 if [ ! -d "$VENV" ]; then

@@ -21,6 +21,7 @@ archive_*.txt
 # PyInstaller build artifacts
 build/
 dist/
+icon.ico
 *.spec.bak
 
 # Misc

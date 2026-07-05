@@ -6,6 +6,8 @@ import json
 import re
 import shutil
 import subprocess
+import tempfile
+import time
 from pathlib import Path
 
 from PySide6.QtCore import QThread, Signal
@@ -79,6 +81,24 @@ def find_ffprobe() -> str:
     raise FileNotFoundError("ffprobe not found.")
 
 
+def probe_duration(ffprobe: str, src: Path) -> float | None:
+    """Return media duration in seconds, or None if ffprobe cannot determine it."""
+    cmd = [
+        ffprobe, "-v", "error",
+        "-show_entries", "format=duration",
+        "-of", "default=noprint_wrappers=1:nokey=1",
+        str(src),
+    ]
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+    if result.returncode != 0:
+        return None
+    try:
+        duration = float(result.stdout.strip())
+    except ValueError:
+        return None
+    return duration if duration > 0 else None
+
+
 def probe_loudness(ffmpeg: str, src: Path) -> dict:
     """Run EBU R128 first-pass loudness scan. Returns loudnorm measured values."""
     cmd = [
@@ -145,6 +165,13 @@ class ConvertWorker(QThread):
         self.trim_silence = trim_silence
         self.clean_tags   = clean_tags
         self.idx_label    = idx_label
+        self._cancelled = False
+        self._process: subprocess.Popen[str] | None = None
+
+    def cancel(self) -> None:
+        self._cancelled = True
+        if self._process and self._process.poll() is None:
+            self._process.terminate()
 
     # ------------------------------------------------------------------
     # QThread entry point
@@ -153,6 +180,8 @@ class ConvertWorker(QThread):
     def run(self) -> None:
         try:
             ffmpeg = find_ffmpeg()
+            ffprobe = find_ffprobe()
+            self.duration = probe_duration(ffprobe, self.src)
             out_path = self._resolve_output_path()
 
             if self.norm_mode == "ebu":
@@ -167,11 +196,17 @@ class ConvertWorker(QThread):
                 if new:
                     out_path = new
 
-            self.progress.emit(100)
-            self.finished_ok.emit(str(out_path))
+            if self._cancelled:
+                self.status.emit("Cancelled.")
+            else:
+                self.progress.emit(100)
+                self.finished_ok.emit(str(out_path))
 
         except Exception as exc:
-            self.failed.emit(str(exc))
+            if self._cancelled:
+                self.status.emit("Cancelled.")
+            else:
+                self.failed.emit(str(exc))
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -293,7 +328,7 @@ class ConvertWorker(QThread):
         cmd = self._build_cmd(ffmpeg, out_path, af)
         self.status.emit(f"{self.idx_label} Converting {self.src.name}...")
         self.progress.emit(10)
-        self._exec(cmd)
+        self._exec(cmd, progress_floor=10, progress_ceiling=90)
         self.progress.emit(90)
 
     def _run_with_ebu(self, ffmpeg: str, out_path: Path) -> None:
@@ -321,15 +356,57 @@ class ConvertWorker(QThread):
         self.status.emit(f"{self.idx_label} Applying loudnorm + converting (pass 2/2)...")
         af = self._audio_filters(loudnorm_apply=lnorm)
         cmd = self._build_cmd(ffmpeg, out_path, af)
-        self._exec(cmd)
+        self._exec(cmd, progress_floor=40, progress_ceiling=90)
         self.progress.emit(90)
 
-    def _exec(self, cmd: list[str]) -> None:
-        """Run ffmpeg command, raise RuntimeError on non-zero exit."""
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
-        if result.returncode != 0:
+    def _exec(
+        self,
+        cmd: list[str],
+        *,
+        progress_floor: int = 0,
+        progress_ceiling: int = 100,
+    ) -> None:
+        """Run ffmpeg command, parsing progress and supporting cancellation."""
+        progress_cmd = cmd[:-1] + ["-progress", "pipe:1", "-nostats", cmd[-1]]
+        with tempfile.TemporaryFile("w+", encoding="utf-8", errors="replace") as stderr_file:
+            self._process = subprocess.Popen(
+                progress_cmd,
+                stdout=subprocess.PIPE,
+                stderr=stderr_file,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+            )
+            assert self._process.stdout is not None
+            last_emit = 0.0
+            for line in self._process.stdout:
+                if self._cancelled:
+                    self._process.terminate()
+                    break
+                key, _, value = line.strip().partition("=")
+                if key == "out_time_ms" and self.duration:
+                    try:
+                        elapsed = int(value) / 1_000_000
+                    except ValueError:
+                        continue
+                    pct = int(min(1.0, elapsed / self.duration) * (progress_ceiling - progress_floor))
+                    now = time.monotonic()
+                    if now - last_emit >= 0.2:
+                        self.progress.emit(progress_floor + pct)
+                        last_emit = now
+            try:
+                code = self._process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                self._process.kill()
+                code = self._process.wait()
+            stderr_file.seek(0)
+            stderr_tail = stderr_file.read()[-800:]
+            self._process = None
+        if self._cancelled:
+            raise RuntimeError("Cancelled.")
+        if code != 0:
             raise RuntimeError(
-                f"ffmpeg error (exit {result.returncode}):\n{result.stderr[-800:]}"
+                f"ffmpeg error (exit {code}):\n{stderr_tail}"
             )
 
 
@@ -360,10 +437,20 @@ class VideoConvertWorker(QThread):
         self.copy_audio = copy_audio
         self.clean_tags = clean_tags
         self.idx_label = idx_label
+        self._cancelled = False
+        self._process: subprocess.Popen[str] | None = None
+        self.duration: float | None = None
+
+    def cancel(self) -> None:
+        self._cancelled = True
+        if self._process and self._process.poll() is None:
+            self._process.terminate()
 
     def run(self) -> None:
         try:
             ffmpeg = find_ffmpeg()
+            ffprobe = find_ffprobe()
+            self.duration = probe_duration(ffprobe, self.src)
             out_path = self._resolve_output_path()
             cmd = self._build_cmd(ffmpeg, out_path)
             self.status.emit(f"{self.idx_label} Converting {self.src.name}...")
@@ -371,7 +458,7 @@ class VideoConvertWorker(QThread):
             try:
                 self._exec(cmd)
             except RuntimeError:
-                if not self.copy_audio:
+                if self._cancelled or not self.copy_audio:
                     raise
                 self.status.emit(
                     f"{self.idx_label} Audio stream incompatible, retrying with AAC/Opus..."
@@ -385,10 +472,16 @@ class VideoConvertWorker(QThread):
                 if new:
                     out_path = new
 
-            self.progress.emit(100)
-            self.finished_ok.emit(str(out_path))
+            if self._cancelled:
+                self.status.emit("Cancelled.")
+            else:
+                self.progress.emit(100)
+                self.finished_ok.emit(str(out_path))
         except Exception as exc:
-            self.failed.emit(str(exc))
+            if self._cancelled:
+                self.status.emit("Cancelled.")
+            else:
+                self.failed.emit(str(exc))
 
     def _resolve_output_path(self) -> Path:
         if self.clean_tags:
@@ -437,8 +530,44 @@ class VideoConvertWorker(QThread):
         return cmd
 
     def _exec(self, cmd: list[str]) -> None:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=1800)
-        if result.returncode != 0:
+        progress_cmd = cmd[:-1] + ["-progress", "pipe:1", "-nostats", cmd[-1]]
+        with tempfile.TemporaryFile("w+", encoding="utf-8", errors="replace") as stderr_file:
+            self._process = subprocess.Popen(
+                progress_cmd,
+                stdout=subprocess.PIPE,
+                stderr=stderr_file,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+            )
+            assert self._process.stdout is not None
+            last_emit = 0.0
+            for line in self._process.stdout:
+                if self._cancelled:
+                    self._process.terminate()
+                    break
+                key, _, value = line.strip().partition("=")
+                if key == "out_time_ms" and self.duration:
+                    try:
+                        elapsed = int(value) / 1_000_000
+                    except ValueError:
+                        continue
+                    pct = int(min(1.0, elapsed / self.duration) * 80)
+                    now = time.monotonic()
+                    if now - last_emit >= 0.2:
+                        self.progress.emit(10 + pct)
+                        last_emit = now
+            try:
+                code = self._process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                self._process.kill()
+                code = self._process.wait()
+            stderr_file.seek(0)
+            stderr_tail = stderr_file.read()[-800:]
+            self._process = None
+        if self._cancelled:
+            raise RuntimeError("Cancelled.")
+        if code != 0:
             raise RuntimeError(
-                f"ffmpeg error (exit {result.returncode}):\n{result.stderr[-800:]}"
+                f"ffmpeg error (exit {code}):\n{stderr_tail}"
             )

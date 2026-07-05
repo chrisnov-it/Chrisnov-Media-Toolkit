@@ -14,18 +14,27 @@ from app.icon import load_svg_icon
 
 
 def main() -> None:
-    app = QApplication(sys.argv)
-    icon_path = Path(__file__).resolve().parent / "icon.svg"
-    if icon_path.exists():
-        app.setWindowIcon(load_svg_icon(icon_path))
     if sys.platform == "win32":
         try:
             ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
-                "chrisnov.yt-downloader.1"
+                "chrisnov.media-toolkit.1"
             )
         except Exception:
             pass
+
+    app = QApplication(sys.argv)
+    app.setApplicationName("Chrisnov Media Toolkit")
+    app.setOrganizationName("Chrisnov IT Solutions")
+
+    icon_path = Path(__file__).resolve().parent / "icon.svg"
+    icon = None
+    if icon_path.exists():
+        icon = load_svg_icon(icon_path)
+        app.setWindowIcon(icon)
+
     w = MainWindow()
+    if icon is not None:
+        w.setWindowIcon(icon)
     w.show()
     sys.exit(app.exec())
 

@@ -11,7 +11,7 @@ This is a small Python desktop app built with PySide6 and `yt-dlp`.
 - `app/cleaner.py` contains filename cleanup helpers.
 - `app/constants.py` stores presets, containers, and shared defaults.
 - `icon.svg` is the application icon.
-- `build-linux.sh`, `build-windows.ps1`, and `chrisnov-yt-downloader.spec` package the app with PyInstaller.
+- `build-linux.sh`, `build-windows.ps1`, and `chrisnov-media-toolkit.spec` package the app with PyInstaller.
 
 Generated folders such as `.venv/`, `build/`, `dist/`, `__pycache__/`, and `.pytest_cache/` should stay out of commits.
 

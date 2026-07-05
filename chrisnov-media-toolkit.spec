@@ -1,8 +1,8 @@
 # -*- mode: python ; coding: utf-8 -*-
 #
-# PyInstaller spec for Chrisnov YT Downloader
-# Build on Linux  : .venv/bin/pyinstaller chrisnov-yt-downloader.spec
-# Build on Windows: .venv\Scripts\pyinstaller chrisnov-yt-downloader.spec
+# PyInstaller spec for Chrisnov Media Toolkit
+# Build on Linux  : .venv/bin/pyinstaller chrisnov-media-toolkit.spec
+# Build on Windows: .venv\Scripts\pyinstaller chrisnov-media-toolkit.spec
 
 import sys
 from pathlib import Path
@@ -54,7 +54,7 @@ exe = EXE(
     a.zipfiles,
     a.datas,
     [],
-    name='chrisnov-yt-downloader',
+    name='chrisnov-media-toolkit',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -66,7 +66,6 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    # Windows: embed the SVG as app icon (PyInstaller converts it automatically
-    # if Pillow is installed; otherwise use an .ico file here instead)
-    icon='icon.svg' if sys.platform != 'win32' else None,
+    icon='icon.ico' if sys.platform == 'win32' and Path('icon.ico').exists()
+    else ('icon.svg' if sys.platform != 'win32' else None),
 )

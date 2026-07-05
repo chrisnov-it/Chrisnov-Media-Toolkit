@@ -19,7 +19,7 @@ i5-5200U / 7GB RAM / Intel HD 5500).
   the whole list expands. Large playlists (>50 entries) ask for confirmation with a size
   estimate.
 - **Skip duplicates** — yt-dlp `download_archive` keeps a history file at
-  `~/.config/chrisnov-yt-downloader/archive_*.txt` (separate for audio vs video).
+  `~/.config/chrisnov-media-toolkit/archive_*.txt` (separate for audio vs video).
   Anything re-queued gets skipped automatically.
 - **Drag-and-drop** — drop a URL, text, or a text file of URLs onto the window
 - Pick output folder (defaults to `~/Videos` or `~/Music` depending on mode)
@@ -44,7 +44,7 @@ Produces a single self-contained binary — no Python installation required for 
 
 ```bash
 bash build-linux.sh
-# Output: dist/chrisnov-yt-downloader  (~70 MB)
+# Output: dist/chrisnov-media-toolkit  (~70 MB)
 ```
 
 ### Windows (single-file .exe)
@@ -53,12 +53,12 @@ bash build-linux.sh
 # In PowerShell from the project root:
 Set-ExecutionPolicy -Scope Process Bypass
 .\build-windows.ps1
-# Output: dist\chrisnov-yt-downloader.exe  (~80-90 MB)
+# Output: dist\chrisnov-media-toolkit.exe  (~80-90 MB)
 ```
 
-The Windows script installs Pillow automatically to convert `icon.svg` to `.ico`
-for the taskbar icon. If you prefer, drop a hand-crafted `icon.ico` in the project
-root and change the `icon=` line in `chrisnov-yt-downloader.spec` accordingly.
+For a custom Windows executable icon, place a hand-crafted `icon.ico` in the
+project root before building. Without it, the `.exe` builds with the default
+Windows application icon; the in-app window icon still uses `icon.svg`.
 
 > **Note on file size:** The binary bundles Python, PySide6, and yt-dlp.
 > ~70-90 MB is normal. Install UPX (`sudo apt install upx` / `choco install upx`)
@@ -70,7 +70,7 @@ root and change the `icon=` line in `chrisnov-yt-downloader.spec` accordingly.
 
 ```bash
 sudo apt install ffmpeg python3-venv
-cd ~/dev/chrisnov-yt-downloader
+cd ~/dev/Chrisnov-Media-Toolkit
 python3 -m venv .venv
 .venv/bin/pip install -U pip
 .venv/bin/pip install PySide6 yt-dlp
@@ -83,7 +83,7 @@ python3 -m venv .venv
 # Install ffmpeg first (winget or choco), e.g.:
 winget install Gyan.FFmpeg
 
-cd %USERPROFILE%\dev\chrisnov-yt-downloader
+cd %USERPROFILE%\dev\Chrisnov-Media-Toolkit
 py -m venv .venv
 .venv\Scripts\pip install -U pip
 .venv\Scripts\pip install PySide6 yt-dlp
@@ -93,7 +93,7 @@ py -m venv .venv
 ## Project layout
 
 ```
-chrisnov-yt-downloader/
+Chrisnov-Media-Toolkit/
 ├── main.py              # entry point
 ├── icon.svg             # app icon (SVG)
 ├── app/
@@ -127,7 +127,7 @@ to count and asks for confirmation with a size estimate.
 
 ## Notes
 
-- Skip-duplicates archive lives at `~/.config/chrisnov-yt-downloader/archive_audio.txt`
+- Skip-duplicates archive lives at `~/.config/chrisnov-media-toolkit/archive_audio.txt`
   (or `archive_video.txt`). Delete these files to re-download from scratch.
 - No GPU mode change needed. Intel Power Saving is fine for this GUI.
 - yt-dlp is bundled via the venv, so a system yt-dlp install is optional.
@@ -226,9 +226,9 @@ di tengah jalan.
 - Klik Start lagi. **Skip duplicates** akan melewati file yang sudah ada di archive.
 - Untuk mengunduh ulang dari awal, hapus file archive:
   ```bash
-  rm ~/.config/chrisnov-yt-downloader/archive_audio.txt
+  rm ~/.config/chrisnov-media-toolkit/archive_audio.txt
   # atau
-  rm ~/.config/chrisnov-yt-downloader/archive_video.txt
+  rm ~/.config/chrisnov-media-toolkit/archive_video.txt
   ```
 
 **Q: Drag-and-drop file teks tapi URL tidak masuk.**
