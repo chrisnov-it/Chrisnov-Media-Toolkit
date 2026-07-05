@@ -44,7 +44,7 @@ Produces a single self-contained binary — no Python installation required for 
 
 ```bash
 bash build-linux.sh
-# Output: dist/chrisnov-media-toolkit  (~70 MB)
+# Output: dist/chrisnov-media-toolkit
 ```
 
 ### Windows (single-file .exe)
@@ -53,7 +53,7 @@ bash build-linux.sh
 # In PowerShell from the project root:
 Set-ExecutionPolicy -Scope Process Bypass
 .\build-windows.ps1
-# Output: dist\chrisnov-media-toolkit.exe  (~80-90 MB)
+# Output: dist\chrisnov-media-toolkit.exe  (~53 MB in current builds)
 ```
 
 For a custom Windows executable icon, place a hand-crafted `icon.ico` in the
@@ -61,8 +61,9 @@ project root before building. Without it, the `.exe` builds with the default
 Windows application icon; the in-app window icon still uses `icon.svg`.
 
 > **Note on file size:** The binary bundles Python, PySide6, and yt-dlp.
-> ~70-90 MB is normal. Install UPX (`sudo apt install upx` / `choco install upx`)
-> before building to shrink it by ~30%.
+> ~50-90 MB is normal depending on OS and dependency versions. The build scripts
+> currently avoid requiring UPX because packed executables can trigger antivirus
+> false positives more often than unpacked PyInstaller builds.
 
 ## Setup
 
@@ -100,6 +101,7 @@ Chrisnov-Media-Toolkit/
 │   ├── constants.py     # presets, container lists, threshold
 │   ├── cleaner.py       # clean_title, rename_with_cleanup, discover_new_files
 │   ├── worker.py        # DownloadWorker (QThread subclass)
+│   ├── converter_worker.py # FFmpeg audio/video converter workers
 │   ├── window.py        # MainWindow (GUI)
 │   └── icon.py          # load_svg_icon helper
 └── .venv/               # Python venv with PySide6 + yt-dlp
@@ -124,6 +126,10 @@ rename step so cleanup always targets the actual file on disk.
 Playlist mode is auto-detected via `list=` in the URL. Before kicking
 off any playlist >50 entries, `_confirm_playlists` does a dry `extract_info`
 to count and asks for confirmation with a size estimate.
+
+Local audio/video conversion uses FFmpeg through `ConvertWorker` and
+`VideoConvertWorker`. The workers parse `ffmpeg -progress` output for live
+progress updates and terminate the FFmpeg subprocess when Cancel is clicked.
 
 ## Notes
 
@@ -181,6 +187,8 @@ Private use.
 | Hapus tag "(Official Music Video)" dari nama file | Pastikan **Clean title** dicentang |
 | Lanjutkan unduhan yang sempat dibatalkan | Klik Start lagi — yang sudah diunduh otomatis dilewati |
 | Ubah folder tujuan | Klik **Browse...** di samping kolom Output folder |
+| Convert satu folder album | Buka **Audio Converter**, klik **Add folder...**, pilih output, klik Convert |
+| Convert video lokal | Buka **Video Converter**, tambah file/folder, pilih format dan kualitas, klik Convert |
 
 ### Pengaturan yang Perlu Diketahui
 
@@ -201,6 +209,14 @@ dengan koma).
 **Skip duplicates** — Kalau dicentang (default), video/lagu yang pernah diunduh
 sebelumnya akan dilewati otomatis. Berguna saat melanjutkan unduhan yang berhenti
 di tengah jalan.
+
+**Audio Converter** — Mengubah file audio atau mengambil audio dari video lokal.
+Format output: mp3, m4a, opus, flac, wav. Bisa pilih bitrate, sample rate,
+normalization, trim silence, dan Add folder untuk batch album.
+
+**Video Converter** — Mengubah video lokal ke mp4, mkv, atau webm. Preset
+kualitas: Keep quality, Balanced, Smaller file. Opsi "Keep original audio when
+possible" menjaga audio asli jika container mendukungnya.
 
 ---
 
