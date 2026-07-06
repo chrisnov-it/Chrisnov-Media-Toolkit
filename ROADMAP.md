@@ -63,10 +63,28 @@ sharing it more broadly.
 - Keep release filenames explicit:
   `chrisnov-media-toolkit-vX.Y.Z-beta.N-windows-x64.exe`.
 - Add SHA256 checksums beside release builds.
+- Add two Windows release variants:
+  - **Lite**: smaller binary, requires FFmpeg installed separately.
+  - **Bundled**: includes `ffmpeg.exe` and `ffprobe.exe` for non-technical
+    users who want the app to work without extra setup.
 - Consider creating GitHub Releases once beta builds are shared outside internal
   testing.
 - Later, investigate installer packaging, Start Menu shortcuts, and code signing
   for better Windows trust signals.
+
+## FFmpeg Bundling Plan
+
+- Keep the current beta as the Lite/non-bundled baseline.
+- Add `bin/ffmpeg.exe` and `bin/ffprobe.exe` only for bundled builds.
+- Patch `find_ffmpeg()` and `find_ffprobe()` to check PyInstaller runtime
+  extraction paths such as `sys._MEIPASS / "bin"` before falling back to PATH.
+- Update `chrisnov-media-toolkit.spec` and/or `build-windows.ps1` so bundled
+  builds include FFmpeg binaries while Lite builds do not.
+- Keep UPX disabled for both variants to reduce antivirus false-positive risk.
+- Expect bundled Windows builds to be much larger, likely 100-300+ MB depending
+  on the FFmpeg build used.
+- Prefer a reputable minimal FFmpeg build over UPX compression if size becomes
+  a concern.
 
 ## Later Ideas
 
