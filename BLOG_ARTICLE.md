@@ -10,6 +10,18 @@ Saat ini aplikasi masih dalam tahap **internal beta**, dengan build pertama:
 v0.1.0-beta.1-windows-x64
 ```
 
+Download beta Windows x64:
+
+```text
+https://dl.chrisnov.com/app/windows/chrisnov-media-toolkit-v0.1.0-beta.1-windows-x64.exe
+```
+
+SHA256:
+
+```text
+3346B887E5DFD63E7DCFE65A0A25A690C29771967868FED32A212A1BAAC037D6
+```
+
 Walaupun belum rilis publik, fitur utamanya sudah fungsional dan sedang diuji di Windows 11. Target awalnya adalah cross-platform untuk **Windows** dan **Linux Mint**.
 
 ## Fitur Utama
@@ -90,7 +102,10 @@ Mayoritas pengujian awal difokuskan di Windows 11, jadi build Windows menjadi pr
 
 ### 1. Siapkan FFmpeg
 
-Chrisnov Media Toolkit membutuhkan FFmpeg untuk proses merge video/audio dan conversion.
+Chrisnov Media Toolkit beta ini adalah versi **Lite**, jadi masih membutuhkan
+FFmpeg terinstall di Windows untuk proses merge video/audio dan conversion.
+Nanti bisa saja ada versi Bundled yang sudah menyertakan FFmpeg, tetapi ukuran
+file-nya akan jauh lebih besar.
 
 Cara install FFmpeg di Windows:
 
@@ -112,6 +127,12 @@ Untuk build beta Windows, file yang digunakan:
 
 ```text
 chrisnov-media-toolkit-v0.1.0-beta.1-windows-x64.exe
+```
+
+Download:
+
+```text
+https://dl.chrisnov.com/app/windows/chrisnov-media-toolkit-v0.1.0-beta.1-windows-x64.exe
 ```
 
 Cukup double-click file tersebut. Tidak perlu install Python.
@@ -207,6 +228,12 @@ Build ini masih beta, jadi hasil di setiap sistem bisa berbeda tergantung:
 - Antivirus atau security policy Windows.
 
 Untuk saat ini build dibuat tanpa UPX. Ukuran file memang sedikit lebih besar, tetapi ini lebih aman untuk mengurangi risiko false positive antivirus. Dalam pengujian, UPX hampir tidak mengurangi ukuran binary, jadi tidak layak dipakai untuk build beta ini.
+
+Build Windows saat ini juga belum menyertakan FFmpeg. Ini membuat ukuran aplikasi
+lebih kecil, tetapi pengguna tetap perlu menginstall FFmpeg sendiri. Ke depan,
+kemungkinan akan ada dua varian: **Lite** untuk pengguna yang sudah punya FFmpeg
+dan **Bundled** untuk pengguna awam yang ingin langsung pakai tanpa setup
+tambahan.
 
 ## Rencana Pengembangan
 
