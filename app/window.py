@@ -12,7 +12,7 @@ from PySide6.QtWidgets import (
     QPushButton, QComboBox, QFileDialog, QMessageBox, QProgressBar, QCheckBox,
     QListWidget, QListWidgetItem, QTabWidget, QGroupBox, QRadioButton,
     QButtonGroup, QDoubleSpinBox, QSpinBox, QAbstractItemView, QScrollArea,
-    QSizePolicy,
+    QSizePolicy, QGridLayout,
 )
 from yt_dlp import YoutubeDL
 
@@ -36,8 +36,8 @@ class MainWindow(QWidget):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Chrisnov Media Toolkit")
-        self.setMinimumSize(820, 620)
-        self.resize(920, 700)
+        self.setMinimumSize(760, 560)
+        self.resize(860, 660)
         self.setAcceptDrops(True)
         self.current_batch: list[str] = []
         self._conv_files: list[Path] = []   # files queued for conversion
@@ -133,6 +133,7 @@ class MainWindow(QWidget):
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QScrollArea.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         scroll.setWidget(widget)
         return scroll
 
@@ -140,7 +141,7 @@ class MainWindow(QWidget):
         self.setStyleSheet("""
             QWidget {
                 font-family: "Segoe UI", "Noto Sans", Arial, sans-serif;
-                font-size: 10.5pt;
+                font-size: 10pt;
             }
             QTabWidget::pane {
                 border: 1px solid #d7dce2;
@@ -148,7 +149,7 @@ class MainWindow(QWidget):
                 background: #fbfcfd;
             }
             QTabBar::tab {
-                padding: 9px 16px;
+                padding: 7px 12px;
                 margin-right: 4px;
                 border-top-left-radius: 7px;
                 border-top-right-radius: 7px;
@@ -173,15 +174,15 @@ class MainWindow(QWidget):
                 padding: 0 4px;
             }
             QLineEdit, QComboBox, QListWidget, QDoubleSpinBox, QSpinBox {
-                min-height: 30px;
+                min-height: 28px;
                 border: 1px solid #cbd3dc;
                 border-radius: 6px;
                 padding: 4px 8px;
                 background: #ffffff;
             }
             QPushButton {
-                min-height: 32px;
-                padding: 5px 12px;
+                min-height: 29px;
+                padding: 4px 9px;
                 border: 1px solid #b8c2cc;
                 border-radius: 6px;
                 background: #f5f7fa;
@@ -244,7 +245,7 @@ class MainWindow(QWidget):
         root.addWidget(self.url_input)
 
         add_row = QHBoxLayout()
-        self.add_queue_btn = QPushButton("Add to queue")
+        self.add_queue_btn = QPushButton("Add")
         self.add_queue_btn.clicked.connect(self._add_url_from_input)
         add_row.addWidget(self.add_queue_btn)
         add_row.addStretch()
@@ -258,9 +259,9 @@ class MainWindow(QWidget):
         root.addWidget(self.queue_list, 1)
 
         qrow = QHBoxLayout()
-        self.remove_btn = QPushButton("Remove selected")
+        self.remove_btn = QPushButton("Remove")
         self.remove_btn.clicked.connect(self._remove_selected)
-        self.clear_btn = QPushButton("Clear queue")
+        self.clear_btn = QPushButton("Clear")
         self.clear_btn.clicked.connect(self._clear_queue)
         qrow.addWidget(self.remove_btn)
         qrow.addWidget(self.clear_btn)
@@ -285,31 +286,35 @@ class MainWindow(QWidget):
         self.clean_tags_input.setClearButtonEnabled(True)
         root.addWidget(self.clean_tags_input)
 
-        # Resolution / container / bitrate row
-        row1 = QHBoxLayout()
+        # Resolution / container / bitrate controls
+        row1 = QGridLayout()
+        row1.setHorizontalSpacing(8)
+        row1.setVerticalSpacing(8)
         self.res_label = QLabel("Resolution:")
-        row1.addWidget(self.res_label)
+        row1.addWidget(self.res_label, 0, 0)
         self.res_combo = QComboBox()
         for label, _ in RES_PRESETS:
             self.res_combo.addItem(label)
         self.res_combo.setCurrentIndex(2)
-        row1.addWidget(self.res_combo, 1)
+        row1.addWidget(self.res_combo, 0, 1)
 
         self.container_label = QLabel("Container:")
-        row1.addWidget(self.container_label)
+        row1.addWidget(self.container_label, 0, 2)
         self.container_combo = QComboBox()
         self.container_combo.addItems(VIDEO_CONTAINERS)
         self.container_combo.setCurrentText("mp4")
-        row1.addWidget(self.container_combo, 1)
+        row1.addWidget(self.container_combo, 0, 3)
 
         self.bitrate_label = QLabel("Bitrate (kbps):")
-        row1.addWidget(self.bitrate_label)
+        row1.addWidget(self.bitrate_label, 1, 0)
         self.bitrate_combo = QComboBox()
         self.bitrate_combo.addItems(AUDIO_BITRATES)
         self.bitrate_combo.setCurrentText("192")
         self.bitrate_combo.setEnabled(False)
         self.bitrate_label.setEnabled(False)
-        row1.addWidget(self.bitrate_combo, 1)
+        row1.addWidget(self.bitrate_combo, 1, 1)
+        row1.setColumnStretch(1, 1)
+        row1.setColumnStretch(3, 1)
         root.addLayout(row1)
 
         # Output folder
@@ -324,7 +329,7 @@ class MainWindow(QWidget):
 
         # Start / Cancel
         row3 = QHBoxLayout()
-        self.download_btn = QPushButton("Start (current OR queue)")
+        self.download_btn = QPushButton("Start")
         self.download_btn.setObjectName("primaryButton")
         self.download_btn.clicked.connect(self._start_download)
         self.cancel_btn = QPushButton("Cancel")
@@ -363,13 +368,13 @@ class MainWindow(QWidget):
         root.addWidget(self.conv_file_list, 1)
 
         fbtn_row = QHBoxLayout()
-        add_files_btn = QPushButton("Add files...")
+        add_files_btn = QPushButton("Files...")
         add_files_btn.clicked.connect(self._conv_browse_files)
-        add_folder_btn = QPushButton("Add folder...")
+        add_folder_btn = QPushButton("Folder...")
         add_folder_btn.clicked.connect(self._conv_browse_folder)
-        self.conv_remove_btn = QPushButton("Remove selected")
+        self.conv_remove_btn = QPushButton("Remove")
         self.conv_remove_btn.clicked.connect(self._conv_remove_selected)
-        self.conv_clear_btn = QPushButton("Clear list")
+        self.conv_clear_btn = QPushButton("Clear")
         self.conv_clear_btn.clicked.connect(self._conv_clear_files)
         fbtn_row.addWidget(add_files_btn)
         fbtn_row.addWidget(add_folder_btn)
@@ -531,13 +536,13 @@ class MainWindow(QWidget):
         root.addWidget(self.video_conv_file_list, 1)
 
         fbtn_row = QHBoxLayout()
-        add_files_btn = QPushButton("Add files...")
+        add_files_btn = QPushButton("Files...")
         add_files_btn.clicked.connect(self._video_conv_browse_files)
-        add_folder_btn = QPushButton("Add folder...")
+        add_folder_btn = QPushButton("Folder...")
         add_folder_btn.clicked.connect(self._video_conv_browse_folder)
-        self.video_conv_remove_btn = QPushButton("Remove selected")
+        self.video_conv_remove_btn = QPushButton("Remove")
         self.video_conv_remove_btn.clicked.connect(self._video_conv_remove_selected)
-        self.video_conv_clear_btn = QPushButton("Clear list")
+        self.video_conv_clear_btn = QPushButton("Clear")
         self.video_conv_clear_btn.clicked.connect(self._video_conv_clear_files)
         fbtn_row.addWidget(add_files_btn)
         fbtn_row.addWidget(add_folder_btn)
