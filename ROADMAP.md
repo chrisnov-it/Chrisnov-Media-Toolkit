@@ -81,6 +81,9 @@ sharing it more broadly.
 - Maintain Linux and macOS Lite artifacts from GitHub Actions workflows.
   These workflows run manually or from `v*` tags, not from every push to `main`.
   The macOS artifact is unsigned and intended for internal testers first.
+- Upload Linux/macOS artifacts and `.sha256` files to Cloudflare R2 under
+  `app/linux/` and `app/macos/` when the required GitHub Actions secrets are
+  configured.
 - Consider creating GitHub Releases once beta builds are shared outside internal
   testing.
 - Later, investigate installer packaging, Start Menu shortcuts, and code signing

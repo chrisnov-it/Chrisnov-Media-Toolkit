@@ -33,7 +33,7 @@ py -m venv .venv
 .venv\Scripts\python main.py
 ```
 
-Build release binaries with `bash build-linux.sh` on Linux or `.\build-windows.ps1` in PowerShell. On Windows, use `.\build-windows.ps1 -Type Lite`, `-Type Bundled`, or `-Type Both`. Linux and macOS Lite artifacts can also be built with GitHub Actions via `.github/workflows/build-linux.yml` and `.github/workflows/build-macos.yml`; both workflows run manually or from `v*` tags, not every push. PyInstaller must run on the target OS. Lite builds require FFmpeg on the system `PATH`; Bundled Windows builds include `bin/ffmpeg.exe` and `bin/ffprobe.exe`.
+Build release binaries with `bash build-linux.sh` on Linux or `.\build-windows.ps1` in PowerShell. On Windows, use `.\build-windows.ps1 -Type Lite`, `-Type Bundled`, or `-Type Both`. Linux and macOS Lite artifacts can also be built with GitHub Actions via `.github/workflows/build-linux.yml` and `.github/workflows/build-macos.yml`; both workflows run manually or from `v*` tags, not every push, then upload artifacts and checksums to Cloudflare R2. Required Actions secrets are `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, and `R2_BUCKET`. PyInstaller must run on the target OS. Lite builds require FFmpeg on the system `PATH`; Bundled Windows builds include `bin/ffmpeg.exe` and `bin/ffprobe.exe`.
 
 ## Coding Style & Naming Conventions
 
