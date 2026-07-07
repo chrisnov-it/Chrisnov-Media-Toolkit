@@ -10,11 +10,15 @@ sharing it more broadly.
 - Downloader for yt-dlp-supported URLs.
 - Audio-only downloads with bitrate/container selection.
 - Batch queue, playlist support, duplicate skip archive, and title cleanup.
+- Playlist title cleanup for completed downloads and completed files left after
+  Cancel.
 - Audio Converter with Add files, Add folder, normalization, trim silence, and
   batch processing.
 - Video Converter with mp4/mkv/webm output, quality presets, folder import,
   FFmpeg progress, and graceful cancel.
-- Windows single-file build: `v0.1.0-beta.1-windows-x64`.
+- Windows single-file builds:
+  - Lite: requires system FFmpeg.
+  - Bundled: includes FFmpeg/FFprobe.
 
 ## Short-Term Priorities
 
@@ -63,7 +67,7 @@ sharing it more broadly.
 - Keep release filenames explicit:
   `chrisnov-media-toolkit-vX.Y.Z-beta.N-windows-x64.exe`.
 - Add SHA256 checksums beside release builds.
-- Add two Windows release variants:
+- Maintain two Windows release variants:
   - **Lite**: smaller binary, requires FFmpeg installed separately.
   - **Bundled**: includes `ffmpeg.exe` and `ffprobe.exe` for non-technical
     users who want the app to work without extra setup.
@@ -72,14 +76,14 @@ sharing it more broadly.
 - Later, investigate installer packaging, Start Menu shortcuts, and code signing
   for better Windows trust signals.
 
-## FFmpeg Bundling Plan
+## FFmpeg Bundling Status
 
-- Keep the current beta as the Lite/non-bundled baseline.
-- Add `bin/ffmpeg.exe` and `bin/ffprobe.exe` only for bundled builds.
-- Patch `find_ffmpeg()` and `find_ffprobe()` to check PyInstaller runtime
-  extraction paths such as `sys._MEIPASS / "bin"` before falling back to PATH.
-- Update `chrisnov-media-toolkit.spec` and/or `build-windows.ps1` so bundled
-  builds include FFmpeg binaries while Lite builds do not.
+- Keep Lite/non-bundled as the baseline for technical users.
+- `build-windows.ps1` supports `-Type Lite`, `-Type Bundled`, and `-Type Both`.
+- Bundled builds include `bin/ffmpeg.exe` and `bin/ffprobe.exe`.
+- `find_ffmpeg()` and `find_ffprobe()` check PyInstaller runtime extraction
+  paths such as `sys._MEIPASS / "bin"` before falling back to local `bin/` and
+  PATH.
 - Keep UPX disabled for both variants to reduce antivirus false-positive risk.
 - Expect bundled Windows builds to be much larger, likely 100-300+ MB depending
   on the FFmpeg build used.

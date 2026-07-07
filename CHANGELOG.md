@@ -42,6 +42,11 @@ All notable changes to this project are documented here.
   `build-windows.ps1` creates `icon.ico` from `icon.svg` when needed and the
   PyInstaller spec embeds it in `chrisnov-media-toolkit.exe`.
 
+- **Lite and Bundled Windows build variants**
+  `build-windows.ps1` now supports `-Type Lite`, `-Type Bundled`, and
+  `-Type Both`. Lite builds require system FFmpeg, while Bundled builds include
+  `ffmpeg.exe` and `ffprobe.exe` from the local `bin/` folder.
+
 - **Contributor guide**
   Added `AGENTS.md` with repository structure, build commands, coding style,
   testing notes, and PR guidelines.
@@ -87,6 +92,10 @@ All notable changes to this project are documented here.
   Start. `_reset_after_batch` now clears both the list widget and the internal
   batch list. This also applies after Cancel.
 
+- **Blog article moved out of the repository**
+  `BLOG_ARTICLE.md` is no longer tracked in this private app repository. The
+  article draft now lives one directory up at `D:\dev\chrisnov-it\BLOG_ARTICLE.md`.
+
 ### Fixed
 
 - **Double file extension on audio-only downloads** (`song.m4a.m4a`)
@@ -114,3 +123,18 @@ All notable changes to this project are documented here.
   by initialising `batch_done = 0` alongside `batch_idx` and `batch_total` in
   `_start_download`, and replacing the fragile `getattr` fallback with a direct
   `+= 1`.
+
+- **Clean title not applied after completed playlist downloads**
+  Playlist downloads previously emitted only a summary string, so the GUI tried
+  to discover files by timestamp. Playlist results now include concrete output
+  paths from yt-dlp metadata, and `_on_item_ok` cleans each completed file.
+
+- **Clean title not applied when cancelling large playlists**
+  Cancelling a playlist used to terminate the worker before `_on_item_ok` could
+  run. Cancel now scans completed media files created since the batch started
+  and applies clean-title renaming before resetting the queue.
+
+- **Opus conversion failing for unsupported sample rates**
+  libopus only accepts specific sample rates. Opus conversion now preserves
+  supported rates and falls back to 48000 Hz for unsupported inputs such as
+  44100 Hz.
