@@ -1,4 +1,5 @@
 name: Build Windows
+run-name: Build Windows ${{ inputs.version || github.ref_name }}
 
 on:
   workflow_dispatch:
