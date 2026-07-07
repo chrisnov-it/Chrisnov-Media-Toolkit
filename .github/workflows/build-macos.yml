@@ -1,4 +1,5 @@
 name: Build macOS
+run-name: Build macOS ${{ inputs.version || github.ref_name }}
 
 on:
   workflow_dispatch:
