@@ -19,11 +19,15 @@ sharing it more broadly.
 - Windows single-file builds:
   - Lite: requires system FFmpeg.
   - Bundled: includes FFmpeg/FFprobe.
+- macOS Lite build workflow via GitHub Actions:
+  - Builds a native unsigned `.app` on a macOS runner.
+  - Packages the app as a ZIP artifact for internal beta testing.
 
 ## Short-Term Priorities
 
 - Test the Windows beta build on multiple Windows 11 machines.
 - Test Linux Mint from source, then produce a Linux binary from Linux.
+- Run the macOS GitHub Actions build and validate the ZIP on a real Mac.
 - Verify taskbar/window icon behavior across source run and built `.exe`.
 - Smoke-test download, audio-only, Audio Converter, Video Converter, Add Folder,
   Cancel, and title cleanup on real-world files.
@@ -71,10 +75,25 @@ sharing it more broadly.
   - **Lite**: smaller binary, requires FFmpeg installed separately.
   - **Bundled**: includes `ffmpeg.exe` and `ffprobe.exe` for non-technical
     users who want the app to work without extra setup.
+- Maintain a macOS Lite artifact from `.github/workflows/build-macos.yml`.
+  This artifact is unsigned and intended for internal testers first.
 - Consider creating GitHub Releases once beta builds are shared outside internal
   testing.
 - Later, investigate installer packaging, Start Menu shortcuts, and code signing
   for better Windows trust signals.
+
+## macOS Packaging Plan
+
+- Build macOS artifacts on GitHub Actions or a real Mac; do not build macOS
+  binaries from Windows or Linux.
+- Start with Lite ZIP releases that require users to install FFmpeg separately,
+  usually via Homebrew.
+- Treat the first macOS ZIPs as unsigned beta builds. Users may need to use
+  right-click > Open or approve the app in macOS security settings.
+- Add macOS FFmpeg bundling only after validating the Lite build, selecting a
+  reputable FFmpeg binary, and documenting third-party licenses.
+- Consider Apple Developer ID signing and notarization before sharing macOS
+  builds broadly.
 
 ## FFmpeg Bundling Status
 

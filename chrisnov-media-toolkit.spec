@@ -2,6 +2,7 @@
 #
 # PyInstaller spec for Chrisnov Media Toolkit
 # Build on Linux  : .venv/bin/pyinstaller chrisnov-media-toolkit.spec
+# Build on macOS  : .venv/bin/pyinstaller chrisnov-media-toolkit.spec
 # Build on Windows: .venv\Scripts\pyinstaller chrisnov-media-toolkit.spec
 
 import os
@@ -10,8 +11,9 @@ from pathlib import Path
 
 build_type = os.environ.get("BUILD_TYPE", "LITE").upper()
 is_bundled = build_type == "BUNDLED"
+is_macos = sys.platform == "darwin"
 
-if is_bundled:
+if is_bundled and not is_macos:
     if not (Path('bin/ffmpeg.exe').exists() and Path('bin/ffprobe.exe').exists()):
         raise FileNotFoundError(
             "ERROR: ffmpeg.exe and ffprobe.exe must be present in the 'bin/' folder "
@@ -19,6 +21,10 @@ if is_bundled:
         )
 
 exe_name = "chrisnov-media-toolkit-bundled" if is_bundled else "chrisnov-media-toolkit-lite"
+app_icon = (
+    'icon.ico' if sys.platform == 'win32' and Path('icon.ico').exists()
+    else ('icon.svg' if sys.platform not in ('win32', 'darwin') else None)
+)
 
 block_cipher = None
 
@@ -29,7 +35,7 @@ a = Analysis(
     datas=[
         # Bundle the SVG icon so it's available at runtime inside the package
         ('icon.svg', '.'),
-    ] + ([('bin/ffmpeg.exe', 'bin'), ('bin/ffprobe.exe', 'bin')] if is_bundled else []),
+    ] + ([('bin/ffmpeg.exe', 'bin'), ('bin/ffprobe.exe', 'bin')] if is_bundled and not is_macos else []),
     hiddenimports=[
         # yt-dlp extractor plugins are loaded dynamically — tell PyInstaller about them
         'yt_dlp.extractor',
@@ -79,6 +85,20 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon='icon.ico' if sys.platform == 'win32' and Path('icon.ico').exists()
-    else ('icon.svg' if sys.platform != 'win32' else None),
+    icon=app_icon,
 )
+
+if is_macos:
+    app = BUNDLE(
+        exe,
+        name='Chrisnov Media Toolkit.app',
+        icon=None,
+        bundle_identifier='com.chrisnovit.mediatoolkit',
+        info_plist={
+            'CFBundleName': 'Chrisnov Media Toolkit',
+            'CFBundleDisplayName': 'Chrisnov Media Toolkit',
+            'CFBundleShortVersionString': os.environ.get('APP_VERSION', '0.1.0-beta.1'),
+            'CFBundleVersion': os.environ.get('APP_BUILD_NUMBER', '1'),
+            'NSHighResolutionCapable': 'True',
+        },
+    )

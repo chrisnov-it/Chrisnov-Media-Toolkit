@@ -11,7 +11,7 @@ This is a small Python desktop app built with PySide6, `yt-dlp`, and FFmpeg.
 - `app/cleaner.py` contains filename cleanup helpers.
 - `app/constants.py` stores presets, containers, and shared defaults.
 - `icon.svg` is the application icon.
-- `build-linux.sh`, `build-windows.ps1`, and `chrisnov-media-toolkit.spec` package the app with PyInstaller.
+- `build-linux.sh`, `build-windows.ps1`, `.github/workflows/build-macos.yml`, and `chrisnov-media-toolkit.spec` package the app with PyInstaller.
 
 Generated folders such as `.venv/`, `build/`, `dist/`, `__pycache__/`, and `.pytest_cache/` should stay out of commits.
 
@@ -33,7 +33,7 @@ py -m venv .venv
 .venv\Scripts\python main.py
 ```
 
-Build release binaries with `bash build-linux.sh` on Linux or `.\build-windows.ps1` in PowerShell. On Windows, use `.\build-windows.ps1 -Type Lite`, `-Type Bundled`, or `-Type Both`. PyInstaller must run on the target OS. Lite builds require FFmpeg on the system `PATH`; Bundled builds include `bin/ffmpeg.exe` and `bin/ffprobe.exe`.
+Build release binaries with `bash build-linux.sh` on Linux or `.\build-windows.ps1` in PowerShell. On Windows, use `.\build-windows.ps1 -Type Lite`, `-Type Bundled`, or `-Type Both`. macOS builds run through `.github/workflows/build-macos.yml` on a macOS GitHub Actions runner and produce an unsigned Lite `.app` ZIP. PyInstaller must run on the target OS. Lite builds require FFmpeg on the system `PATH`; Bundled Windows builds include `bin/ffmpeg.exe` and `bin/ffprobe.exe`.
 
 ## Coding Style & Naming Conventions
 
@@ -41,7 +41,7 @@ Use Python 3 style with 4-space indentation, type hints where practical, and con
 
 ## Testing Guidelines
 
-There is no committed automated test suite yet. For changes, run the app locally and smoke-test the affected workflow: queue a URL, start/cancel a download, test playlist clean-title behavior, test audio-only mode, and test audio/video converter drag-and-drop when relevant. If adding tests, prefer `pytest`, place tests under `tests/`, and name files `test_*.py`.
+There is no committed automated test suite yet. For changes, run the app locally and smoke-test the affected workflow: queue a URL, start/cancel a download, test playlist clean-title behavior, test audio-only mode, and test audio/video converter drag-and-drop when relevant. For macOS packaging changes, verify the GitHub Actions artifact on a real Mac because signing, Gatekeeper, and FFmpeg availability cannot be proven from Windows. If adding tests, prefer `pytest`, place tests under `tests/`, and name files `test_*.py`.
 
 ## Commit & Pull Request Guidelines
 
