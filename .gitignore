@@ -28,3 +28,9 @@ icon.ico
 .pytest_cache/
 *.egg-info/
 *.bak
+
+# Bundled FFmpeg binaries (downloaded by build-windows.ps1)
+bin/
+
+# Scratch/test files
+scratch/

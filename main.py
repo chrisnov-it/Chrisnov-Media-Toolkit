@@ -5,7 +5,17 @@ A minimal PySide6 GUI wrapper around yt-dlp. See the README for features and set
 
 import sys
 import ctypes
+import os
 from pathlib import Path
+
+# Put bundled/local bin directory in PATH so that both shutil.which and yt-dlp find ffmpeg/ffprobe
+if hasattr(sys, "_MEIPASS"):
+    bin_dir = Path(sys._MEIPASS) / "bin"
+else:
+    bin_dir = Path(__file__).resolve().parent / "bin"
+
+if bin_dir.exists():
+    os.environ["PATH"] = str(bin_dir) + os.pathsep + os.environ.get("PATH", "")
 
 from PySide6.QtWidgets import QApplication
 
