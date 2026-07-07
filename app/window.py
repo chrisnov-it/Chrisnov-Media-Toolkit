@@ -876,8 +876,30 @@ class MainWindow(QWidget):
     def _cancel_download(self) -> None:
         if hasattr(self, "worker") and self.worker.isRunning():
             self.worker.terminate()
-            self.status_label.setText("Cancelled.")
+            self.worker.wait(3000)
+            cleaned = self._cleanup_recent_downloads()
+            if cleaned:
+                self.status_label.setText(
+                    f"Cancelled. Cleaned {len(cleaned)} completed file(s), e.g. {cleaned[0]!r}"
+                )
+            else:
+                self.status_label.setText("Cancelled.")
         self._reset_after_batch()
+
+    def _cleanup_recent_downloads(self) -> list[str]:
+        if not getattr(self, "clean_tags", None):
+            return []
+        outdir = getattr(self, "outdir", None)
+        start_ts = getattr(self, "batch_start_ts", None)
+        if not outdir or start_ts is None:
+            return []
+        exts = audio_extensions() if getattr(self, "audio_only", False) else video_extensions()
+        renamed: list[str] = []
+        for p in discover_new_files(outdir, start_ts, exts):
+            new = rename_with_cleanup(p, self.clean_tags)
+            if new is not None:
+                renamed.append(new.name)
+        return renamed
 
     def _reset_after_batch(self) -> None:
         self.current_batch.clear()
