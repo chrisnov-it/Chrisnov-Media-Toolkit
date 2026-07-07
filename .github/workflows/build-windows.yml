@@ -83,8 +83,11 @@ jobs:
           R2_BUCKET: ${{ secrets.R2_BUCKET }}
         run: |
           $endpoint = "https://${env:R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
+          $scripts = Join-Path $PWD ".venv\Scripts"
+          $env:PATH = "$scripts;$env:PATH"
+          $aws = (Get-Command aws -ErrorAction Stop).Source
 
-          .\.venv\Scripts\aws.exe s3 cp "dist\${env:LITE_NAME}" "s3://${env:R2_BUCKET}/app/windows/${env:LITE_NAME}" --endpoint-url $endpoint
-          .\.venv\Scripts\aws.exe s3 cp "dist\${env:LITE_NAME}.sha256" "s3://${env:R2_BUCKET}/app/windows/${env:LITE_NAME}.sha256" --endpoint-url $endpoint
-          .\.venv\Scripts\aws.exe s3 cp "dist\${env:BUNDLED_NAME}" "s3://${env:R2_BUCKET}/app/windows/${env:BUNDLED_NAME}" --endpoint-url $endpoint
-          .\.venv\Scripts\aws.exe s3 cp "dist\${env:BUNDLED_NAME}.sha256" "s3://${env:R2_BUCKET}/app/windows/${env:BUNDLED_NAME}.sha256" --endpoint-url $endpoint
+          & $aws s3 cp "dist\${env:LITE_NAME}" "s3://${env:R2_BUCKET}/app/windows/${env:LITE_NAME}" --endpoint-url $endpoint
+          & $aws s3 cp "dist\${env:LITE_NAME}.sha256" "s3://${env:R2_BUCKET}/app/windows/${env:LITE_NAME}.sha256" --endpoint-url $endpoint
+          & $aws s3 cp "dist\${env:BUNDLED_NAME}" "s3://${env:R2_BUCKET}/app/windows/${env:BUNDLED_NAME}" --endpoint-url $endpoint
+          & $aws s3 cp "dist\${env:BUNDLED_NAME}.sha256" "s3://${env:R2_BUCKET}/app/windows/${env:BUNDLED_NAME}.sha256" --endpoint-url $endpoint
