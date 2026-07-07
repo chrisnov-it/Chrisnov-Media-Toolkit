@@ -58,10 +58,10 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ env.TAR_NAME }}
+          name: chrisnov-media-toolkit-linux-x64-lite
           path: |
-            dist/${{ env.TAR_NAME }}
-            dist/${{ env.TAR_NAME }}.sha256
+            dist/chrisnov-media-toolkit-v*-linux-x64-lite.tar.gz
+            dist/chrisnov-media-toolkit-v*-linux-x64-lite.tar.gz.sha256
           if-no-files-found: error
 
       - name: Upload to Cloudflare R2

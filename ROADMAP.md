@@ -19,6 +19,7 @@ sharing it more broadly.
 - Windows single-file builds:
   - Lite: requires system FFmpeg.
   - Bundled: includes FFmpeg/FFprobe.
+  - GitHub Actions can build both variants and upload them to R2.
 - Linux Lite build workflow via GitHub Actions:
   - Builds a native x64 binary on `ubuntu-latest`.
   - Packages the binary as a `.tar.gz` artifact for Linux Mint testing.
@@ -74,15 +75,16 @@ sharing it more broadly.
 - Keep release filenames explicit:
   `chrisnov-media-toolkit-vX.Y.Z-beta.N-windows-x64.exe`.
 - Add SHA256 checksums beside release builds.
-- Maintain two Windows release variants:
+- Maintain two Windows release variants locally and through
+  `.github/workflows/build-windows.yml`:
   - **Lite**: smaller binary, requires FFmpeg installed separately.
   - **Bundled**: includes `ffmpeg.exe` and `ffprobe.exe` for non-technical
     users who want the app to work without extra setup.
-- Maintain Linux and macOS Lite artifacts from GitHub Actions workflows.
+- Maintain Windows, Linux, and macOS artifacts from GitHub Actions workflows.
   These workflows run manually or from `v*` tags, not from every push to `main`.
   The macOS artifact is unsigned and intended for internal testers first.
-- Upload Linux/macOS artifacts and `.sha256` files to Cloudflare R2 under
-  `app/linux/` and `app/macos/` when the required GitHub Actions secrets are
+- Upload artifacts and `.sha256` files to Cloudflare R2 under `app/windows/`,
+  `app/linux/`, and `app/macos/` when the required GitHub Actions secrets are
   configured.
 - Consider creating GitHub Releases once beta builds are shared outside internal
   testing.

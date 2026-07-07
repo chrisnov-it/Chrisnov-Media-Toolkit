@@ -54,10 +54,10 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ env.ZIP_NAME }}
+          name: chrisnov-media-toolkit-macos-lite
           path: |
-            dist/${{ env.ZIP_NAME }}
-            dist/${{ env.ZIP_NAME }}.sha256
+            dist/chrisnov-media-toolkit-v*-macos-lite.zip
+            dist/chrisnov-media-toolkit-v*-macos-lite.zip.sha256
           if-no-files-found: error
 
       - name: Upload to Cloudflare R2

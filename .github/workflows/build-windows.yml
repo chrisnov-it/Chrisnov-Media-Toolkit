@@ -1,0 +1,90 @@
+name: Build Windows
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version, for example 0.1.0-beta.1"
+        required: true
+        default: "0.1.0-beta.1"
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  build:
+    name: Windows x64 Lite and Bundled EXE
+    runs-on: windows-latest
+
+    env:
+      APP_VERSION_RAW: ${{ github.event.inputs.version || github.ref_name }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Python dependencies
+        shell: pwsh
+        run: |
+          python -m venv .venv
+          .\.venv\Scripts\python.exe -m pip install --upgrade pip
+          .\.venv\Scripts\python.exe -m pip install PySide6 yt-dlp pyinstaller awscli
+
+      - name: Prepare build metadata
+        shell: pwsh
+        run: |
+          $version = "${env:APP_VERSION_RAW}".TrimStart("v")
+          "APP_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Build Windows Lite and Bundled executables
+        shell: pwsh
+        run: |
+          Set-ExecutionPolicy -Scope Process Bypass -Force
+          .\build-windows.ps1 -Type Both
+
+      - name: Package versioned executables
+        shell: pwsh
+        run: |
+          $liteName = "chrisnov-media-toolkit-v${env:APP_VERSION}-windows-x64-lite.exe"
+          $bundledName = "chrisnov-media-toolkit-v${env:APP_VERSION}-windows-x64-bundled.exe"
+
+          Copy-Item -LiteralPath "dist\chrisnov-media-toolkit-lite.exe" -Destination "dist\$liteName" -Force
+          Copy-Item -LiteralPath "dist\chrisnov-media-toolkit-bundled.exe" -Destination "dist\$bundledName" -Force
+
+          (Get-FileHash -Algorithm SHA256 "dist\$liteName").Hash | Set-Content -Path "dist\$liteName.sha256"
+          (Get-FileHash -Algorithm SHA256 "dist\$bundledName").Hash | Set-Content -Path "dist\$bundledName.sha256"
+
+          "LITE_NAME=$liteName" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "BUNDLED_NAME=$bundledName" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: chrisnov-media-toolkit-windows-x64
+          path: |
+            dist/chrisnov-media-toolkit-v*-windows-x64-lite.exe
+            dist/chrisnov-media-toolkit-v*-windows-x64-lite.exe.sha256
+            dist/chrisnov-media-toolkit-v*-windows-x64-bundled.exe
+            dist/chrisnov-media-toolkit-v*-windows-x64-bundled.exe.sha256
+          if-no-files-found: error
+
+      - name: Upload to Cloudflare R2
+        shell: pwsh
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+        run: |
+          $endpoint = "https://${env:R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
+
+          .\.venv\Scripts\aws.exe s3 cp "dist\${env:LITE_NAME}" "s3://${env:R2_BUCKET}/app/windows/${env:LITE_NAME}" --endpoint-url $endpoint
+          .\.venv\Scripts\aws.exe s3 cp "dist\${env:LITE_NAME}.sha256" "s3://${env:R2_BUCKET}/app/windows/${env:LITE_NAME}.sha256" --endpoint-url $endpoint
+          .\.venv\Scripts\aws.exe s3 cp "dist\${env:BUNDLED_NAME}" "s3://${env:R2_BUCKET}/app/windows/${env:BUNDLED_NAME}" --endpoint-url $endpoint
+          .\.venv\Scripts\aws.exe s3 cp "dist\${env:BUNDLED_NAME}.sha256" "s3://${env:R2_BUCKET}/app/windows/${env:BUNDLED_NAME}.sha256" --endpoint-url $endpoint

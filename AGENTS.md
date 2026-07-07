@@ -11,7 +11,7 @@ This is a small Python desktop app built with PySide6, `yt-dlp`, and FFmpeg.
 - `app/cleaner.py` contains filename cleanup helpers.
 - `app/constants.py` stores presets, containers, and shared defaults.
 - `icon.svg` is the application icon.
-- `build-linux.sh`, `build-windows.ps1`, `.github/workflows/build-linux.yml`, `.github/workflows/build-macos.yml`, and `chrisnov-media-toolkit.spec` package the app with PyInstaller.
+- `build-linux.sh`, `build-windows.ps1`, `.github/workflows/build-windows.yml`, `.github/workflows/build-linux.yml`, `.github/workflows/build-macos.yml`, and `chrisnov-media-toolkit.spec` package the app with PyInstaller.
 
 Generated folders such as `.venv/`, `build/`, `dist/`, `__pycache__/`, and `.pytest_cache/` should stay out of commits.
 
@@ -33,7 +33,7 @@ py -m venv .venv
 .venv\Scripts\python main.py
 ```
 
-Build release binaries with `bash build-linux.sh` on Linux or `.\build-windows.ps1` in PowerShell. On Windows, use `.\build-windows.ps1 -Type Lite`, `-Type Bundled`, or `-Type Both`. Linux and macOS Lite artifacts can also be built with GitHub Actions via `.github/workflows/build-linux.yml` and `.github/workflows/build-macos.yml`; both workflows run manually or from `v*` tags, not every push, then upload artifacts and checksums to Cloudflare R2. Required Actions secrets are `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, and `R2_BUCKET`. PyInstaller must run on the target OS. Lite builds require FFmpeg on the system `PATH`; Bundled Windows builds include `bin/ffmpeg.exe` and `bin/ffprobe.exe`.
+Build release binaries with `bash build-linux.sh` on Linux or `.\build-windows.ps1` in PowerShell. On Windows, use `.\build-windows.ps1 -Type Lite`, `-Type Bundled`, or `-Type Both`. Windows, Linux, and macOS artifacts can also be built with GitHub Actions via `.github/workflows/build-windows.yml`, `.github/workflows/build-linux.yml`, and `.github/workflows/build-macos.yml`; these workflows run manually or from `v*` tags, not every push, then upload artifacts and checksums to Cloudflare R2. Required Actions secrets are `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, and `R2_BUCKET`. PyInstaller must run on the target OS. Lite builds require FFmpeg on the system `PATH`; Bundled Windows builds include `bin/ffmpeg.exe` and `bin/ffprobe.exe`.
 
 ## Coding Style & Naming Conventions
 
