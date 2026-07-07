@@ -2,12 +2,12 @@
 
 ## Project Structure & Module Organization
 
-This is a small Python desktop app built with PySide6 and `yt-dlp`.
+This is a small Python desktop app built with PySide6, `yt-dlp`, and FFmpeg.
 
 - `main.py` is the application entry point.
 - `app/window.py` contains the main GUI and user workflow.
 - `app/worker.py` handles threaded downloads with `yt-dlp`.
-- `app/converter_worker.py` handles local audio conversion.
+- `app/converter_worker.py` handles local audio and video conversion.
 - `app/cleaner.py` contains filename cleanup helpers.
 - `app/constants.py` stores presets, containers, and shared defaults.
 - `icon.svg` is the application icon.
@@ -33,15 +33,15 @@ py -m venv .venv
 .venv\Scripts\python main.py
 ```
 
-Build release binaries with `bash build-linux.sh` on Linux or `.\build-windows.ps1` in PowerShell. PyInstaller must run on the target OS. Install `ffmpeg` separately for download merging and audio conversion.
+Build release binaries with `bash build-linux.sh` on Linux or `.\build-windows.ps1` in PowerShell. On Windows, use `.\build-windows.ps1 -Type Lite`, `-Type Bundled`, or `-Type Both`. PyInstaller must run on the target OS. Lite builds require FFmpeg on the system `PATH`; Bundled builds include `bin/ffmpeg.exe` and `bin/ffprobe.exe`.
 
 ## Coding Style & Naming Conventions
 
-Use Python 3 style with 4-space indentation, type hints where practical, and concise docstrings for modules or non-obvious behavior. Follow existing naming: classes use `PascalCase`, functions and attributes use `snake_case`, and GUI-only helper methods commonly use a leading underscore. Keep worker logic outside the GUI thread by using `QThread` patterns already present in `DownloadWorker` and `ConvertWorker`.
+Use Python 3 style with 4-space indentation, type hints where practical, and concise docstrings for modules or non-obvious behavior. Follow existing naming: classes use `PascalCase`, functions and attributes use `snake_case`, and GUI-only helper methods commonly use a leading underscore. Keep worker logic outside the GUI thread by using `QThread` patterns already present in `DownloadWorker`, `ConvertWorker`, and `VideoConvertWorker`.
 
 ## Testing Guidelines
 
-There is no committed automated test suite yet. For changes, run the app locally and smoke-test the affected workflow: queue a URL, start/cancel a download, test audio-only mode, and test converter drag-and-drop when relevant. If adding tests, prefer `pytest`, place tests under `tests/`, and name files `test_*.py`.
+There is no committed automated test suite yet. For changes, run the app locally and smoke-test the affected workflow: queue a URL, start/cancel a download, test playlist clean-title behavior, test audio-only mode, and test audio/video converter drag-and-drop when relevant. If adding tests, prefer `pytest`, place tests under `tests/`, and name files `test_*.py`.
 
 ## Commit & Pull Request Guidelines
 
@@ -49,4 +49,4 @@ Recent commits use short, imperative summaries, for example `Add converter tab, 
 
 ## Security & Configuration Tips
 
-Do not commit downloaded media, archives, virtual environments, or build outputs. Treat user-selected paths and downloaded filenames carefully; keep cleanup and rename behavior conservative. Avoid broad network or filesystem changes outside the selected output folder.
+Do not commit downloaded media, archives, virtual environments, or build outputs. `test_opus.opus` is a local reference sample and should remain untracked unless explicitly requested. Treat user-selected paths and downloaded filenames carefully; keep cleanup and rename behavior conservative. Avoid broad network or filesystem changes outside the selected output folder.
