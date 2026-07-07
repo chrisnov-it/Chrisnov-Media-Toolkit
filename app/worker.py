@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from PySide6.QtCore import QThread, Signal
@@ -39,8 +40,12 @@ class DownloadWorker(QThread):
             with YoutubeDL(ytdl_opts) as ydl:
                 info = ydl.extract_info(self.url, download=True)
             if isinstance(info, dict) and "entries" in info and info["entries"]:
-                n = len(info["entries"])
-                self.finished_ok.emit(f"playlist:{n}:{info.get('title', '?')}")
+                paths = self._collect_saved_paths(info, ydl)
+                if paths:
+                    self.finished_ok.emit("playlist_files:" + json.dumps(paths))
+                else:
+                    n = len(info["entries"])
+                    self.finished_ok.emit(f"playlist:{n}:{info.get('title', '?')}")
             else:
                 saved = ydl.prepare_filename(info)
                 if self.audio_only:
@@ -101,6 +106,52 @@ class DownloadWorker(QThread):
             "outtmpl": str(Path(self.outdir) / "%(title)s [%(height)sp].%(ext)s"),
         })
         return opts
+
+    def _collect_saved_paths(self, info: dict, ydl: YoutubeDL) -> list[str]:
+        """Collect final output paths from a playlist extraction result."""
+        paths: list[str] = []
+        seen: set[str] = set()
+        for entry in info.get("entries") or []:
+            path = self._saved_path_for_entry(entry, ydl)
+            if path and path not in seen:
+                paths.append(path)
+                seen.add(path)
+        return paths
+
+    def _saved_path_for_entry(self, entry: dict | None, ydl: YoutubeDL) -> str | None:
+        if not isinstance(entry, dict):
+            return None
+
+        candidates: list[str] = []
+        for item in entry.get("requested_downloads") or []:
+            if isinstance(item, dict):
+                candidates.extend(
+                    str(v) for v in (item.get("filepath"), item.get("filename")) if v
+                )
+        candidates.extend(
+            str(v)
+            for v in (entry.get("filepath"), entry.get("_filename"), entry.get("filename"))
+            if v
+        )
+
+        try:
+            candidates.append(ydl.prepare_filename(entry))
+        except Exception:
+            pass
+
+        for candidate in candidates:
+            path = Path(candidate)
+            if self.audio_only:
+                path = path.with_suffix(f".{self.container}")
+            if path.exists():
+                return str(path)
+
+        if candidates:
+            path = Path(candidates[-1])
+            if self.audio_only:
+                path = path.with_suffix(f".{self.container}")
+            return str(path)
+        return None
 
 
 def audio_extensions() -> set[str]:

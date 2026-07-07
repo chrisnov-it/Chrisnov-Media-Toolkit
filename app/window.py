@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import time
 from pathlib import Path
 
@@ -838,7 +839,16 @@ class MainWindow(QWidget):
 
     def _on_item_ok(self, path: str) -> None:
         renamed_list: list[str] = []
-        if isinstance(path, str) and path.startswith("playlist:"):
+        if isinstance(path, str) and path.startswith("playlist_files:"):
+            try:
+                playlist_paths = json.loads(path.removeprefix("playlist_files:"))
+            except json.JSONDecodeError:
+                playlist_paths = []
+            for p in playlist_paths:
+                new = rename_with_cleanup(p, self.clean_tags)
+                if new is not None:
+                    renamed_list.append(new.name)
+        elif isinstance(path, str) and path.startswith("playlist:"):
             exts = audio_extensions() if self.audio_only else video_extensions()
             for p in discover_new_files(self.outdir, self.batch_start_ts, exts):
                 new = rename_with_cleanup(p, self.clean_tags)
