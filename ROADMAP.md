@@ -19,6 +19,9 @@ sharing it more broadly.
 - Windows single-file builds:
   - Lite: requires system FFmpeg.
   - Bundled: includes FFmpeg/FFprobe.
+- Linux Lite build workflow via GitHub Actions:
+  - Builds a native x64 binary on `ubuntu-latest`.
+  - Packages the binary as a `.tar.gz` artifact for Linux Mint testing.
 - macOS Lite build workflow via GitHub Actions:
   - Builds a native unsigned `.app` on a macOS runner.
   - Packages the app as a ZIP artifact for internal beta testing.
@@ -26,7 +29,7 @@ sharing it more broadly.
 ## Short-Term Priorities
 
 - Test the Windows beta build on multiple Windows 11 machines.
-- Test Linux Mint from source, then produce a Linux binary from Linux.
+- Run the Linux GitHub Actions build and validate the `.tar.gz` on Linux Mint.
 - Run the macOS GitHub Actions build and validate the ZIP on a real Mac.
 - Verify taskbar/window icon behavior across source run and built `.exe`.
 - Smoke-test download, audio-only, Audio Converter, Video Converter, Add Folder,
@@ -75,8 +78,9 @@ sharing it more broadly.
   - **Lite**: smaller binary, requires FFmpeg installed separately.
   - **Bundled**: includes `ffmpeg.exe` and `ffprobe.exe` for non-technical
     users who want the app to work without extra setup.
-- Maintain a macOS Lite artifact from `.github/workflows/build-macos.yml`.
-  This artifact is unsigned and intended for internal testers first.
+- Maintain Linux and macOS Lite artifacts from GitHub Actions workflows.
+  These workflows run manually or from `v*` tags, not from every push to `main`.
+  The macOS artifact is unsigned and intended for internal testers first.
 - Consider creating GitHub Releases once beta builds are shared outside internal
   testing.
 - Later, investigate installer packaging, Start Menu shortcuts, and code signing
