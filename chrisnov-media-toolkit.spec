@@ -4,8 +4,21 @@
 # Build on Linux  : .venv/bin/pyinstaller chrisnov-media-toolkit.spec
 # Build on Windows: .venv\Scripts\pyinstaller chrisnov-media-toolkit.spec
 
+import os
 import sys
 from pathlib import Path
+
+build_type = os.environ.get("BUILD_TYPE", "LITE").upper()
+is_bundled = build_type == "BUNDLED"
+
+if is_bundled:
+    if not (Path('bin/ffmpeg.exe').exists() and Path('bin/ffprobe.exe').exists()):
+        raise FileNotFoundError(
+            "ERROR: ffmpeg.exe and ffprobe.exe must be present in the 'bin/' folder "
+            "to build the BUNDLED version of the application."
+        )
+
+exe_name = "chrisnov-media-toolkit-bundled" if is_bundled else "chrisnov-media-toolkit-lite"
 
 block_cipher = None
 
@@ -16,7 +29,7 @@ a = Analysis(
     datas=[
         # Bundle the SVG icon so it's available at runtime inside the package
         ('icon.svg', '.'),
-    ],
+    ] + ([('bin/ffmpeg.exe', 'bin'), ('bin/ffprobe.exe', 'bin')] if is_bundled else []),
     hiddenimports=[
         # yt-dlp extractor plugins are loaded dynamically — tell PyInstaller about them
         'yt_dlp.extractor',
@@ -54,7 +67,7 @@ exe = EXE(
     a.zipfiles,
     a.datas,
     [],
-    name='chrisnov-media-toolkit',
+    name=exe_name,
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,

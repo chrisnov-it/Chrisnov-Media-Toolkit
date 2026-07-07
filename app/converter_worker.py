@@ -58,26 +58,52 @@ DEFAULT_LRA = 11.0
 # ---------------------------------------------------------------------------
 
 def find_ffmpeg() -> str:
-    """Return path to ffmpeg binary, preferring project-local bin/ if present."""
-    local = Path(__file__).resolve().parent.parent / "bin" / "ffmpeg"
+    """Return path to ffmpeg binary, preferring project-local bin/ or PyInstaller bundled bin/."""
+    import sys
+    ext = ".exe" if sys.platform == "win32" else ""
+
+    # 1. Check PyInstaller temp directory (sys._MEIPASS)
+    if hasattr(sys, "_MEIPASS"):
+        bundled = Path(sys._MEIPASS) / "bin" / f"ffmpeg{ext}"
+        if bundled.exists():
+            return str(bundled)
+
+    # 2. Check local project-level bin/ folder
+    local = Path(__file__).resolve().parent.parent / "bin" / f"ffmpeg{ext}"
     if local.exists():
         return str(local)
+
+    # 3. Check system PATH
     system = shutil.which("ffmpeg")
     if system:
         return system
+
     raise FileNotFoundError(
         "ffmpeg not found. Install it with: sudo apt install ffmpeg"
     )
 
 
 def find_ffprobe() -> str:
-    """Return path to ffprobe binary."""
-    local = Path(__file__).resolve().parent.parent / "bin" / "ffprobe"
+    """Return path to ffprobe binary, preferring project-local bin/ or PyInstaller bundled bin/."""
+    import sys
+    ext = ".exe" if sys.platform == "win32" else ""
+
+    # 1. Check PyInstaller temp directory (sys._MEIPASS)
+    if hasattr(sys, "_MEIPASS"):
+        bundled = Path(sys._MEIPASS) / "bin" / f"ffprobe{ext}"
+        if bundled.exists():
+            return str(bundled)
+
+    # 2. Check local project-level bin/ folder
+    local = Path(__file__).resolve().parent.parent / "bin" / f"ffprobe{ext}"
     if local.exists():
         return str(local)
+
+    # 3. Check system PATH
     system = shutil.which("ffprobe")
     if system:
         return system
+
     raise FileNotFoundError("ffprobe not found.")
 
 
@@ -300,6 +326,10 @@ class ConvertWorker(QThread):
         return ["-c:a", "copy"]
 
     def _sample_rate_args(self) -> list[str]:
+        if self.fmt == "opus":
+            if self.sample_rate in {8000, 12000, 16000, 24000, 48000}:
+                return ["-ar", str(self.sample_rate)]
+            return ["-ar", "48000"]
         if self.sample_rate:
             return ["-ar", str(self.sample_rate)]
         return []
