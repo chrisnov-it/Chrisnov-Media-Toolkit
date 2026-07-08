@@ -49,7 +49,7 @@ jobs:
         run: |
           ZIP_NAME="chrisnov-media-toolkit-v${APP_VERSION}-macos-lite.zip"
           ditto -c -k --sequesterRsrc --keepParent "dist/Chrisnov Media Toolkit.app" "dist/${ZIP_NAME}"
-          shasum -a 256 "dist/${ZIP_NAME}" > "dist/${ZIP_NAME}.sha256"
+          (cd dist && shasum -a 256 "${ZIP_NAME}") > "dist/${ZIP_NAME}.sha256"
           echo "ZIP_NAME=${ZIP_NAME}" >> "$GITHUB_ENV"
 
       - name: Upload artifact

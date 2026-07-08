@@ -99,6 +99,6 @@ if is_macos:
             'CFBundleDisplayName': 'Chrisnov Media Toolkit',
             'CFBundleShortVersionString': os.environ.get('APP_VERSION', '0.1.0-beta.1'),
             'CFBundleVersion': os.environ.get('APP_BUILD_NUMBER', '1'),
-            'NSHighResolutionCapable': 'True',
+            'NSHighResolutionCapable': True,
         },
     )
