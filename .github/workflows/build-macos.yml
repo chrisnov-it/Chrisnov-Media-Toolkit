@@ -5,7 +5,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Release version, for example 0.1.0-beta.1"
+        description: "Release version, for example 0.1.0-beta.2"
         required: true
         default: "0.1.0-beta.2"
   push:
@@ -13,8 +13,8 @@ on:
       - "v*"
 
 jobs:
-  build:
-    name: macOS Lite ZIP
+  build-arm64:
+    name: macOS ARM64 Lite ZIP (Apple Silicon)
     runs-on: macos-latest
     timeout-minutes: 30
 
@@ -48,7 +48,7 @@ jobs:
 
       - name: Package app as ZIP
         run: |
-          ZIP_NAME="chrisnov-media-toolkit-v${APP_VERSION}-macos-lite.zip"
+          ZIP_NAME="chrisnov-media-toolkit-v${APP_VERSION}-macos-arm64-lite.zip"
           ditto -c -k --sequesterRsrc --keepParent "dist/Chrisnov Media Toolkit.app" "dist/${ZIP_NAME}"
           (cd dist && shasum -a 256 "${ZIP_NAME}") > "dist/${ZIP_NAME}.sha256"
           echo "ZIP_NAME=${ZIP_NAME}" >> "$GITHUB_ENV"
@@ -56,10 +56,10 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: chrisnov-media-toolkit-macos-lite
+          name: chrisnov-media-toolkit-macos-arm64-lite
           path: |
-            dist/chrisnov-media-toolkit-v*-macos-lite.zip
-            dist/chrisnov-media-toolkit-v*-macos-lite.zip.sha256
+            dist/chrisnov-media-toolkit-v*-macos-arm64-lite.zip
+            dist/chrisnov-media-toolkit-v*-macos-arm64-lite.zip.sha256
           if-no-files-found: error
 
       - name: Upload to Cloudflare R2
@@ -71,5 +71,66 @@ jobs:
           R2_BUCKET: ${{ secrets.R2_BUCKET }}
         run: |
           ENDPOINT="https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
-          aws s3 cp "dist/${ZIP_NAME}" "s3://${R2_BUCKET}/app/macos/${ZIP_NAME}" --endpoint-url "${ENDPOINT}"
+          aws s3 cp "dist/${ZIP_NAME}"        "s3://${R2_BUCKET}/app/macos/${ZIP_NAME}"        --endpoint-url "${ENDPOINT}"
+          aws s3 cp "dist/${ZIP_NAME}.sha256" "s3://${R2_BUCKET}/app/macos/${ZIP_NAME}.sha256" --endpoint-url "${ENDPOINT}"
+
+  build-intel:
+    name: macOS x86_64 Lite ZIP (Intel)
+    runs-on: macos-13
+    timeout-minutes: 30
+
+    env:
+      APP_VERSION_RAW: ${{ github.event.inputs.version || github.ref_name }}
+      BUILD_TYPE: LITE
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install PySide6 yt-dlp pyinstaller awscli
+
+      - name: Prepare build metadata
+        run: |
+          VERSION="${APP_VERSION_RAW#v}"
+          echo "APP_VERSION=${VERSION}" >> "$GITHUB_ENV"
+          echo "APP_BUILD_NUMBER=${GITHUB_RUN_NUMBER}" >> "$GITHUB_ENV"
+
+      - name: Build unsigned macOS app
+        run: |
+          pyinstaller chrisnov-media-toolkit.spec
+
+      - name: Package app as ZIP
+        run: |
+          ZIP_NAME="chrisnov-media-toolkit-v${APP_VERSION}-macos-x86_64-lite.zip"
+          ditto -c -k --sequesterRsrc --keepParent "dist/Chrisnov Media Toolkit.app" "dist/${ZIP_NAME}"
+          (cd dist && shasum -a 256 "${ZIP_NAME}") > "dist/${ZIP_NAME}.sha256"
+          echo "ZIP_NAME=${ZIP_NAME}" >> "$GITHUB_ENV"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: chrisnov-media-toolkit-macos-x86_64-lite
+          path: |
+            dist/chrisnov-media-toolkit-v*-macos-x86_64-lite.zip
+            dist/chrisnov-media-toolkit-v*-macos-x86_64-lite.zip.sha256
+          if-no-files-found: error
+
+      - name: Upload to Cloudflare R2
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+        run: |
+          ENDPOINT="https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
+          aws s3 cp "dist/${ZIP_NAME}"        "s3://${R2_BUCKET}/app/macos/${ZIP_NAME}"        --endpoint-url "${ENDPOINT}"
           aws s3 cp "dist/${ZIP_NAME}.sha256" "s3://${R2_BUCKET}/app/macos/${ZIP_NAME}.sha256" --endpoint-url "${ENDPOINT}"
