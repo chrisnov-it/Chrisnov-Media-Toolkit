@@ -53,7 +53,7 @@ jobs:
         run: |
           TAR_NAME="chrisnov-media-toolkit-v${APP_VERSION}-linux-x64-lite.tar.gz"
           tar -C dist -czf "dist/${TAR_NAME}" chrisnov-media-toolkit-lite
-          sha256sum "dist/${TAR_NAME}" > "dist/${TAR_NAME}.sha256"
+          (cd dist && sha256sum "${TAR_NAME}") > "dist/${TAR_NAME}.sha256"
           echo "TAR_NAME=${TAR_NAME}" >> "$GITHUB_ENV"
 
       - name: Upload artifact
