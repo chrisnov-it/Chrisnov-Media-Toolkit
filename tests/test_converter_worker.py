@@ -12,13 +12,25 @@ from app.converter_worker import (
 
 
 class TestFFmpegDiscovery:
-    def test_find_ffmpeg_returns_path_or_none(self):
-        ff = find_ffmpeg()
-        assert ff is None or isinstance(ff, str)
+    """find_ffmpeg() / find_ffprobe() return a path when the binary is on
+    PATH, otherwise raise FileNotFoundError. Both outcomes are valid; we
+    only assert that the function doesn't return garbage."""
 
-    def test_find_ffprobe_returns_path_or_none(self):
-        fp = find_ffprobe()
-        assert fp is None or isinstance(fp, str)
+    def test_find_ffmpeg_handles_missing(self):
+        # On a CI Ubuntu runner without ffmpeg, this raises FileNotFoundError;
+        # with the binary available (developer machines) it returns a string.
+        try:
+            ff = find_ffmpeg()
+            assert ff is None or isinstance(ff, str)
+        except FileNotFoundError:
+            pass
+
+    def test_find_ffprobe_handles_missing(self):
+        try:
+            fp = find_ffprobe()
+            assert fp is None or isinstance(fp, str)
+        except FileNotFoundError:
+            pass
 
 
 class TestCodecArgs:
@@ -88,9 +100,14 @@ class TestCodecArgs:
 
 
 class TestProbeDuration:
-    def test_probe_duration_returns_none_for_missing_file(self):
-        from pathlib import Path
-        dur = probe_duration("ffprobe", Path("/nonexistent/file.mp3"))
+    def test_probe_duration_returns_none_for_missing_file(self, tmp_path):
+        # Use whatever binary discoverable (or a dummy string) - we only
+        # verify the function tolerates a file that doesn't exist.
+        try:
+            ffprobe = find_ffprobe()
+        except FileNotFoundError:
+            ffprobe = "ffprobe"
+        dur = probe_duration(ffprobe, tmp_path / "nonexistent.mp3")
         assert dur is None
 
     def test_probe_duration_works_on_real_file(self, tmp_path):
