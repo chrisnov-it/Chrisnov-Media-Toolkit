@@ -41,7 +41,30 @@ Use Python 3 style with 4-space indentation, type hints where practical, and con
 
 ## Testing Guidelines
 
-There is no committed automated test suite yet. For changes, run the app locally and smoke-test the affected workflow: queue a URL, start/cancel a download, test playlist clean-title behavior, test audio-only mode, and test audio/video converter drag-and-drop when relevant. For Linux/macOS packaging changes, verify the GitHub Actions artifacts on real target systems because desktop libraries, signing, Gatekeeper, and FFmpeg availability cannot be proven from Windows. If adding tests, prefer `pytest`, place tests under `tests/`, and name files `test_*.py`.
+Automated tests live under `tests/` and run with `pytest`. Setup:
+
+```bash
+python3 -m venv .venv
+.venv/bin/pip install -U pip PySide6 pytest
+.venv/bin/python -m pytest tests/ -v
+```
+
+Current coverage: title cleanup, tag parsing, rename with collision
+suffix, file discovery (`tests/test_cleaner.py`); converter codec/sample
+rate logic, ffmpeg probing, input-extension whitelist
+(`tests/test_converter_worker.py`).
+
+The full test suite runs on every push and pull request via
+`.github/workflows/tests.yml`.
+
+For changes that touch GUI behavior without an automated test, run the
+app locally and smoke-test the affected workflow: queue a URL, start/cancel
+download, test playlist clean-title behavior, test audio-only mode, and
+test audio/video converter drag-and-drop when relevant.
+
+For Linux/macOS packaging changes, verify the GitHub Actions artifacts
+on real target systems because desktop libraries, signing, Gatekeeper,
+and FFmpeg availability cannot be proven from Windows.
 
 ## Commit & Pull Request Guidelines
 
