@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import json
+import sys
 import time
 from pathlib import Path
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QDragEnterEvent, QDropEvent
 from PySide6.QtWidgets import (
-    QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
+    QApplication, QDialog, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
     QPushButton, QComboBox, QFileDialog, QMessageBox, QProgressBar, QCheckBox,
     QListWidget, QListWidgetItem, QTabWidget, QGroupBox, QRadioButton,
     QButtonGroup, QDoubleSpinBox, QSpinBox, QAbstractItemView, QScrollArea,
@@ -18,7 +19,7 @@ from PySide6.QtWidgets import (
 from yt_dlp import YoutubeDL
 
 from .constants import (
-    RES_PRESETS, VIDEO_CONTAINERS, AUDIO_CONTAINERS, AUDIO_BITRATES,
+    APP_VERSION, RES_PRESETS, VIDEO_CONTAINERS, AUDIO_CONTAINERS, AUDIO_BITRATES,
     PLAYLIST_CONFIRM_THRESHOLD,
 )
 from .cleaner import (
@@ -124,6 +125,24 @@ class MainWindow(QWidget):
         root.setContentsMargins(14, 14, 14, 14)
         root.setSpacing(10)
 
+        # Header: app name + version label + About button
+        header = QHBoxLayout()
+        header.setContentsMargins(0, 0, 0, 0)
+        app_label = QLabel("Chrisnov Media Toolkit")
+        app_label.setObjectName("appNameLabel")
+        ver_label = QLabel(f"v{APP_VERSION}")
+        ver_label.setObjectName("versionLabel")
+        about_btn = QPushButton("About")
+        about_btn.setObjectName("aboutButton")
+        about_btn.setFixedWidth(64)
+        about_btn.clicked.connect(self._show_about)
+        header.addWidget(app_label)
+        header.addSpacing(6)
+        header.addWidget(ver_label)
+        header.addStretch()
+        header.addWidget(about_btn)
+        root.addLayout(header)
+
         self._tabs = QTabWidget()
         self._tabs.addTab(self._wrap_tab(self._build_downloader_tab()), "⬇  Downloader")
         self._tabs.addTab(self._wrap_tab(self._build_converter_tab()), "♫  Audio Converter")
@@ -226,11 +245,127 @@ class MainWindow(QWidget):
                 border-radius: 8px;
                 background: #2f80ed;
             }
+            QLabel#appNameLabel {
+                font-size: 11pt;
+                font-weight: 700;
+                color: #1a2533;
+            }
+            QLabel#versionLabel {
+                font-size: 9pt;
+                color: #8a94a0;
+                padding-top: 2px;
+            }
+            QPushButton#aboutButton {
+                font-size: 9pt;
+                color: #4a5568;
+                border-color: #d7dce2;
+                background: transparent;
+            }
+            QPushButton#aboutButton:hover {
+                background: #edf2f7;
+            }
         """)
 
     # ------------------------------------------------------------------ #
     #  Tab 1 — Downloader                                                  #
     # ------------------------------------------------------------------ #
+
+    def _show_about(self) -> None:
+        """Show the About dialog with version, runtime, and dependency info."""
+        import importlib.metadata as meta
+
+        def _ver(pkg: str) -> str:
+            try:
+                return meta.version(pkg)
+            except meta.PackageNotFoundError:
+                return "n/a"
+
+        pyside_ver = _ver("PySide6")
+        ytdlp_ver  = _ver("yt-dlp")
+
+        platform_str = {
+            "win32":  "Windows",
+            "darwin": "macOS",
+            "linux":  "Linux",
+        }.get(sys.platform, sys.platform)
+        py_ver = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
+
+        dlg = QDialog(self)
+        dlg.setWindowTitle("About Chrisnov Media Toolkit")
+        dlg.setFixedWidth(380)
+        dlg.setWindowFlags(dlg.windowFlags() & ~Qt.WindowContextHelpButtonHint)
+
+        layout = QVBoxLayout(dlg)
+        layout.setContentsMargins(24, 24, 24, 20)
+        layout.setSpacing(4)
+
+        # App name + version
+        name_lbl = QLabel("Chrisnov Media Toolkit")
+        name_lbl.setAlignment(Qt.AlignCenter)
+        name_lbl.setStyleSheet("font-size: 13pt; font-weight: 700; color: #1a2533;")
+        layout.addWidget(name_lbl)
+
+        ver_lbl = QLabel(f"Version {APP_VERSION}")
+        ver_lbl.setAlignment(Qt.AlignCenter)
+        ver_lbl.setStyleSheet("font-size: 9pt; color: #8a94a0; margin-bottom: 12px;")
+        layout.addWidget(ver_lbl)
+
+        # Divider
+        line = QLabel()
+        line.setFixedHeight(1)
+        line.setStyleSheet("background: #d7dce2; margin: 8px 0;")
+        layout.addWidget(line)
+
+        # Info rows
+        def _row(label: str, value: str) -> None:
+            row = QHBoxLayout()
+            lbl = QLabel(label)
+            lbl.setStyleSheet("color: #4a5568; font-size: 9pt;")
+            val = QLabel(value)
+            val.setStyleSheet("color: #1a2533; font-size: 9pt;")
+            val.setAlignment(Qt.AlignRight)
+            row.addWidget(lbl)
+            row.addStretch()
+            row.addWidget(val)
+            layout.addLayout(row)
+
+        _row("Platform",  platform_str)
+        _row("Python",    py_ver)
+        _row("PySide6",   pyside_ver)
+        _row("yt-dlp",    ytdlp_ver)
+
+        # Divider
+        line2 = QLabel()
+        line2.setFixedHeight(1)
+        line2.setStyleSheet("background: #d7dce2; margin: 8px 0;")
+        layout.addWidget(line2)
+
+        # Description
+        desc = QLabel(
+            "A minimal media downloader and converter\n"
+            "built with PySide6, yt-dlp, and FFmpeg."
+        )
+        desc.setAlignment(Qt.AlignCenter)
+        desc.setStyleSheet("font-size: 9pt; color: #4a5568;")
+        layout.addWidget(desc)
+
+        credit = QLabel("© Chrisnov IT Solutions")
+        credit.setAlignment(Qt.AlignCenter)
+        credit.setStyleSheet("font-size: 8pt; color: #8a94a0; margin-top: 4px;")
+        layout.addWidget(credit)
+
+        # Close button
+        layout.addSpacing(8)
+        close_btn = QPushButton("Close")
+        close_btn.clicked.connect(dlg.accept)
+        close_btn.setFixedWidth(80)
+        btn_row = QHBoxLayout()
+        btn_row.addStretch()
+        btn_row.addWidget(close_btn)
+        btn_row.addStretch()
+        layout.addLayout(btn_row)
+
+        dlg.exec()
 
     def _build_downloader_tab(self) -> QWidget:
         w = QWidget()

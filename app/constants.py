@@ -1,5 +1,7 @@
 """UI constants — combobox option lists and presets."""
 
+APP_VERSION = "0.1.0-beta.2"
+
 RES_PRESETS = [
     ("Best (no limit)", None),
     ("1080p", 1080),
