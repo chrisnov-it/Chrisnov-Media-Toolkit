@@ -26,16 +26,18 @@ sharing it more broadly.
 - macOS Lite build workflow via GitHub Actions:
   - Builds a native unsigned `.app` on a macOS runner.
   - Packages the app as a ZIP artifact for internal beta testing.
+- Build pipeline fully validated: PyInstaller 6.x compatibility confirmed,
+  sha256 checksums correct for end-user verification, Retina display fixed.
 
 ## Short-Term Priorities
 
+- ~~Run the macOS GitHub Actions build and validate the ZIP on a real Mac.~~ *(build done, tester needed)*
 - Test the Windows beta build on multiple Windows 11 machines.
 - Run the Linux GitHub Actions build and validate the `.tar.gz` on Linux Mint.
-- Run the macOS GitHub Actions build and validate the ZIP on a real Mac.
 - Verify taskbar/window icon behavior across source run and built `.exe`.
 - Smoke-test download, audio-only, Audio Converter, Video Converter, Add Folder,
   Cancel, and title cleanup on real-world files.
-- Add a visible version label in the app, for example `v0.1.0-beta.1`.
+- Add a visible version label in the app, for example `v0.1.0-beta.2`.
 - Add a simple About dialog with app name, version, build platform, and credits.
 
 ## UI & Usability
@@ -64,11 +66,14 @@ sharing it more broadly.
 ## Reliability & Testing
 
 - Add lightweight automated tests for filename cleanup and path collision logic.
-- Add manual release checklist for Windows and Linux.
+- Add manual release checklist for Windows, Linux, and macOS.
 - Improve cancellation for downloader workers if yt-dlp exposes a safer stop
   path than thread termination.
 - Keep builds unpacked by default; avoid UPX unless a specific distribution
   need justifies the antivirus false-positive risk.
+- Add smoke-test step to GitHub Actions after PyInstaller completes (e.g.
+  invoke the binary with `--help` or `--version`) to catch non-functional builds
+  before they reach R2.
 
 ## Packaging & Release
 
