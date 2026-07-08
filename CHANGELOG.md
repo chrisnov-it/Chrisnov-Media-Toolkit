@@ -4,7 +4,79 @@ All notable changes to this project are documented here.
 
 ---
 
-## [Unreleased] — 2026-07-05
+## [0.1.0-beta.2] — 2026-07-08
+
+### Fixed
+
+- **Build always reported failure on Linux** (`build-linux.sh`)
+  `OUT` was set to `dist/chrisnov-media-toolkit` but the spec produces
+  `dist/chrisnov-media-toolkit-lite`; the success check always missed the
+  real output and exited 1. Fixed the path to match the spec.
+
+- **PyInstaller 6.x build failure** (`chrisnov-media-toolkit.spec`)
+  `cipher=block_cipher` was passed to `Analysis` and `PYZ`; PyInstaller 6.0
+  removed cipher support entirely, raising `TypeError` on every build.
+  Both arguments removed.
+
+- **Linux BUNDLED build guard checked Windows paths** (`chrisnov-media-toolkit.spec`)
+  The bundled guard used `not is_macos`, which is also True on Linux. It
+  then checked for `bin/ffmpeg.exe`, so a Linux BUNDLED build always raised
+  `FileNotFoundError`. Fixed to `sys.platform == 'win32'`.
+
+- **Crash when yt-dlp reports speed as None** (`app/worker.py`)
+  While buffering, yt-dlp sets `speed: None` instead of omitting the key.
+  The progress hook divided by `d.get('speed', 0)`, causing `TypeError`.
+  Fixed with `(d.get('speed') or 0)`.
+
+- **mp3 sample rate ignored / duplicate `-ar` flag** (`app/converter_worker.py`)
+  `_codec_args` hardcoded `-ar 44100` for mp3 regardless of the user's
+  sample rate choice; when an explicit rate was selected, `-ar` appeared
+  twice. Removed from `_codec_args` and delegated to `_sample_rate_args`.
+
+- **Multi-select remove corrupted backing list** (`app/window.py`)
+  Forward iteration through selected rows and `.pop()` by index shifted all
+  subsequent indices, causing the wrong items to be removed from the backing
+  list while the widget stayed in sync — silent data corruption. Fixed by
+  collecting rows into a set and iterating in reverse order. Affected the
+  downloader queue, audio converter file list, and video converter file list.
+
+- **Cancel race: signals fired after batch reset** (`app/window.py`)
+  `_cancel_download` called `terminate()` without first disconnecting worker
+  signals. If `finished_ok` or `failed` fired after `_reset_after_batch()`
+  cleared the batch, `_kick_next()` would increment stale indices and could
+  start a phantom download. Signals are now disconnected before `terminate()`.
+
+- **Converter clean-title silently disabled by downloader checkbox** (`app/window.py`)
+  Both converter tabs guarded clean-title logic with `self.clean_chk.isChecked()`
+  (the downloader tab's checkbox). Unchecking that unrelated checkbox silently
+  disabled title cleanup in the converters. Each tab now reads the tag list
+  independently.
+
+- **Retina/HiDPI blurry rendering on macOS** (`chrisnov-media-toolkit.spec`)
+  `NSHighResolutionCapable` was set to the string `'True'` instead of the
+  boolean `True`; macOS ignored the string value. Fixed.
+
+- **sha256 files embedded `dist/` path prefix** (`.github/workflows/`)
+  On Linux and macOS, `sha256sum`/`shasum` was run against the full
+  `dist/<filename>` path, so the checksum file contained `dist/foo.tar.gz`
+  instead of just `foo.tar.gz`. `sha256sum -c` would fail for anyone
+  verifying a flat download. Both workflows now `cd dist` before hashing.
+
+- **PowerShell `finally` block skipped on missing FFmpeg** (`build-windows.ps1`)
+  `exit 1` inside a `try` block bypasses `finally` in PowerShell, leaving
+  temp extract directories on disk. Changed to `throw`.
+
+### Changed
+
+- Added `set -o pipefail` to `build-linux.sh`.
+- Added `timeout-minutes: 30` to all three GitHub Actions build jobs to
+  prevent hung PyInstaller runs from consuming runners for hours.
+- Added `BUILD_TYPE: LITE` to the Windows workflow job `env:` block (Linux
+  and macOS already had it) for consistency.
+
+---
+
+## [0.1.0-beta.1] — 2026-07-05
 
 ### Added
 

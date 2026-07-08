@@ -87,7 +87,25 @@ Chrisnov Media Toolkit.
 - Updated the landing page portfolio entry from Chrisnov YT Downloader to
   Chrisnov Media Toolkit.
 
-## 9. Remaining Follow-Up
+## 10. Bug Fixes and Build Pipeline Hardening (v0.1.0-beta.2)
+
+- Fixed build-linux.sh always reporting failure due to wrong output path check.
+- Dropped `cipher=block_cipher` from spec to fix builds with PyInstaller 6.x.
+- Fixed BUNDLED guard using `not is_macos` (was also true on Linux); now checks
+  `sys.platform == 'win32'` explicitly.
+- Fixed yt-dlp speed=None crash in download progress hook.
+- Fixed mp3 sample rate: removed hardcoded `-ar 44100` from `_codec_args`,
+  delegated to `_sample_rate_args` like all other formats.
+- Fixed multi-select remove in all three list widgets to iterate in reverse
+  order, preventing backing list corruption.
+- Fixed cancel race by disconnecting worker signals before `terminate()`.
+- Fixed converter clean-title being silently disabled by the downloader checkbox.
+- Fixed Retina blurry rendering: `NSHighResolutionCapable` now a proper bool.
+- Fixed sha256 files on Linux and macOS embedding a `dist/` path prefix.
+- Fixed PowerShell `finally` skip on failed FFmpeg extraction in build-windows.ps1.
+- Added `set -o pipefail` to build-linux.sh.
+- Added `timeout-minutes: 30` to all three GitHub Actions build jobs.
+- Added `BUILD_TYPE: LITE` to Windows workflow job env for consistency.
 
 - Test playlist cleanup and cancel cleanup on real large playlists.
 - Rebuild and publish fresh Lite/Bundled binaries after the latest cleanup fixes.
