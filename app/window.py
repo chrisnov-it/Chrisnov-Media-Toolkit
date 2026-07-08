@@ -661,8 +661,12 @@ class MainWindow(QWidget):
         return "youtube.com" in url or "youtu.be" in url
 
     def _remove_selected(self) -> None:
-        for item in self.queue_list.selectedItems():
-            row = self.queue_list.row(item)
+        # Collect rows descending so each pop/takeItem doesn't shift remaining indices
+        rows = sorted(
+            {self.queue_list.row(item) for item in self.queue_list.selectedItems()},
+            reverse=True,
+        )
+        for row in rows:
             if 0 <= row < len(self.current_batch):
                 self.current_batch.pop(row)
             self.queue_list.takeItem(row)
@@ -875,6 +879,15 @@ class MainWindow(QWidget):
 
     def _cancel_download(self) -> None:
         if hasattr(self, "worker") and self.worker.isRunning():
+            # Disconnect signals first so any in-flight finished_ok/failed
+            # callbacks don't call _kick_next() on the already-reset state.
+            try:
+                self.worker.progress.disconnect()
+                self.worker.status.disconnect()
+                self.worker.finished_ok.disconnect()
+                self.worker.failed.disconnect()
+            except RuntimeError:
+                pass
             self.worker.terminate()
             self.worker.wait(3000)
             cleaned = self._cleanup_recent_downloads()
@@ -954,8 +967,11 @@ class MainWindow(QWidget):
             self._conv_add_folder(Path(folder))
 
     def _conv_remove_selected(self) -> None:
-        for item in self.conv_file_list.selectedItems():
-            row = self.conv_file_list.row(item)
+        rows = sorted(
+            {self.conv_file_list.row(item) for item in self.conv_file_list.selectedItems()},
+            reverse=True,
+        )
+        for row in rows:
             if 0 <= row < len(self._conv_files):
                 self._conv_files.pop(row)
             self.conv_file_list.takeItem(row)
@@ -1033,7 +1049,7 @@ class MainWindow(QWidget):
             norm_mode = "none"
 
         clean_tags = None
-        if self.conv_clean_chk.isChecked() and self.clean_chk.isChecked():
+        if self.conv_clean_chk.isChecked():
             clean_tags = parse_tag_list(self.clean_tags_input.text())
 
         self.conv_status_label.setText(f"{idx_label} Preparing {src.name}...")
@@ -1134,8 +1150,11 @@ class MainWindow(QWidget):
             self._video_conv_add_folder(Path(folder))
 
     def _video_conv_remove_selected(self) -> None:
-        for item in self.video_conv_file_list.selectedItems():
-            row = self.video_conv_file_list.row(item)
+        rows = sorted(
+            {self.video_conv_file_list.row(item) for item in self.video_conv_file_list.selectedItems()},
+            reverse=True,
+        )
+        for row in rows:
             if 0 <= row < len(self._video_conv_files):
                 self._video_conv_files.pop(row)
             self.video_conv_file_list.takeItem(row)
@@ -1186,7 +1205,7 @@ class MainWindow(QWidget):
         src = self._video_conv_queue[self._video_conv_idx]
         idx_label = f"[{self._video_conv_idx + 1}/{self._video_conv_total}]"
         clean_tags = None
-        if self.video_conv_clean_chk.isChecked() and self.clean_chk.isChecked():
+        if self.video_conv_clean_chk.isChecked():
             clean_tags = parse_tag_list(self.clean_tags_input.text())
 
         self.video_conv_status_label.setText(f"{idx_label} Preparing {src.name}...")

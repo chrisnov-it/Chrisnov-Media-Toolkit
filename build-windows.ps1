@@ -101,8 +101,7 @@ if ($Type -eq "Bundled" -or $Type -eq "Both") {
                     Move-Item -Path $extractedFfprobe.FullName -Destination "$binDir\ffprobe.exe" -Force
                     Write-Host "FFmpeg and FFprobe successfully downloaded and placed in '$binDir'." -ForegroundColor Green
                 } else {
-                    Write-Host "ERROR: Could not find ffmpeg.exe or ffprobe.exe in the extracted files." -ForegroundColor Red
-                    exit 1
+                    throw "Could not find ffmpeg.exe or ffprobe.exe in the extracted archive."
                 }
             } catch {
                 Write-Host "ERROR: Failed to obtain FFmpeg. Ensure you are connected to the internet or install FFmpeg on your system." -ForegroundColor Red
