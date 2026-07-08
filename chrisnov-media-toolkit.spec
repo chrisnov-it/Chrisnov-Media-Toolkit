@@ -35,7 +35,7 @@ a = Analysis(
     datas=[
         # Bundle the SVG icon so it's available at runtime inside the package
         ('icon.svg', '.'),
-    ] + ([('bin/ffmpeg.exe', 'bin'), ('bin/ffprobe.exe', 'bin')] if is_bundled and not is_macos else []),
+    ] + ([('bin/ffmpeg.exe', 'bin'), ('bin/ffprobe.exe', 'bin')] if is_bundled and sys.platform == 'win32' else []),
     hiddenimports=[
         # yt-dlp extractor plugins are loaded dynamically — tell PyInstaller about them
         'yt_dlp.extractor',
