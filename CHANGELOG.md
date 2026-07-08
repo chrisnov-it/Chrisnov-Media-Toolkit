@@ -73,6 +73,30 @@ All notable changes to this project are documented here.
   prevent hung PyInstaller runs from consuming runners for hours.
 - Added `BUILD_TYPE: LITE` to the Windows workflow job `env:` block (Linux
   and macOS already had it) for consistency.
+- Wrapped Windows `.exe` builds in `.zip` archives (using
+  `Compress-Archive`) so Chrome does not block the download with
+  SmartScreen. SHA256 and R2 uploads now target the `.zip` files. No
+  more applying `$PWD` directly for venv path resolution — using
+  `$env:GITHUB_WORKSPACE` instead.
+- macOS build split into two parallel jobs: `build-arm64` (Apple Silicon)
+  and `build-intel` (`macos-13`, for Intel Macs including 2015 hardware).
+  Each produces its own ZIP artifact and R2 object.
+- Playlist inspection moved to a `PlaylistInspectWorker` thread; the UI
+  is no longer blocked while walking the playlists to count entries.
+  The large-playlist confirmation dialog now appears as a callback.
+- `DownloadWorker` gained a clean `cancel()` method (consistent with
+  the converter workers). Cancel no longer relies on
+  `QThread.terminate()` first; it raises from inside the yt-dlp progress
+  hook and waits up to 5 s for graceful shutdown before falling back.
+
+### Added
+
+- Initial automated test suite under `tests/` covering `app.cleaner`
+  and core `app.converter_worker` logic (46 tests). Runs on every push
+  and PR via `.github/workflows/tests.yml`.
+- `APP_VERSION` constant in `app/constants.py`. Shown in a header
+  label and in a new About dialog (`MainWindow._show_about`) reporting
+  platform, Python, PySide6, and yt-dlp versions.
 
 ---
 
