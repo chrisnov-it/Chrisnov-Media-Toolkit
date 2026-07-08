@@ -177,3 +177,59 @@ def audio_extensions() -> set[str]:
 
 def video_extensions() -> set[str]:
     return {"mp4", "mkv", "webm"}
+
+
+class PlaylistInspectWorker(QThread):
+    """Inspect playlist URLs off the GUI thread to get their entry counts.
+
+    Emits:
+        progress(str)           — status text for the status label
+        done(object)            — list[tuple[url, n, est_str, title]] for
+                                  playlists that exceed *threshold* entries
+        error(str, str)         — (url, error_message) on first failure
+    """
+
+    progress = Signal(str)
+    done     = Signal(object)   # list[tuple[str, int, str, str]]
+    error    = Signal(str, str)
+
+    def __init__(self, playlist_urls: list[str], audio_only: bool,
+                 threshold: int):
+        super().__init__()
+        self.playlist_urls = playlist_urls
+        self.audio_only    = audio_only
+        self.threshold     = threshold
+        self._cancelled    = False
+
+    def cancel(self) -> None:
+        self._cancelled = True
+
+    def run(self) -> None:
+        dry_opts = {
+            "quiet": True, "no_warnings": True,
+            "skip_download": True, "extract_flat": True,
+        }
+        total = len(self.playlist_urls)
+        big: list[tuple[str, int, str, str]] = []
+        for i, p_url in enumerate(self.playlist_urls, 1):
+            if self._cancelled:
+                return
+            self.progress.emit(f"Inspecting playlist {i}/{total}...")
+            try:
+                with YoutubeDL(dry_opts) as ydl:
+                    info = ydl.extract_info(p_url, download=False)
+            except Exception as exc:
+                if not self._cancelled:
+                    self.error.emit(p_url, str(exc))
+                return
+            if self._cancelled:
+                return
+            entries = (info or {}).get("entries") or []
+            n = (info or {}).get("playlist_count") or len(entries)
+            if n >= self.threshold:
+                per_mb  = 3 if self.audio_only else 15
+                est_mb  = n * per_mb
+                est_str = f"{est_mb / 1000:.1f} GB" if est_mb > 500 else f"{est_mb} MB"
+                big.append((p_url, n, est_str, (info or {}).get("title", "?")))
+        if not self._cancelled:
+            self.done.emit(big)

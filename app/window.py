@@ -16,7 +16,7 @@ from PySide6.QtWidgets import (
     QButtonGroup, QDoubleSpinBox, QSpinBox, QAbstractItemView, QScrollArea,
     QSizePolicy, QGridLayout,
 )
-from yt_dlp import YoutubeDL
+from yt_dlp import YoutubeDL  # noqa: F401 — kept for potential future use in window
 
 from .constants import (
     APP_VERSION, RES_PRESETS, VIDEO_CONTAINERS, AUDIO_CONTAINERS, AUDIO_BITRATES,
@@ -25,7 +25,7 @@ from .constants import (
 from .cleaner import (
     DEFAULT_CLEAN_TAGS, parse_tag_list, rename_with_cleanup, discover_new_files,
 )
-from .worker import DownloadWorker, audio_extensions, video_extensions
+from .worker import DownloadWorker, PlaylistInspectWorker, audio_extensions, video_extensions
 from .converter_worker import (
     ConvertWorker, SUPPORTED_INPUT_EXTENSIONS, OUTPUT_FORMATS,
     AUDIO_BITRATES as CONV_BITRATES, SAMPLE_RATES, DEFAULT_LUFS,
@@ -46,6 +46,7 @@ class MainWindow(QWidget):
         self._conv_worker: ConvertWorker | None = None
         self._video_conv_files: list[Path] = []
         self._video_conv_worker: VideoConvertWorker | None = None
+        self._inspect_worker: PlaylistInspectWorker | None = None
         self._build_ui()
 
     # ------------------------------------------------------------------ #
@@ -886,9 +887,6 @@ class MainWindow(QWidget):
             if old_archive_path.exists() and not archive_path.exists():
                 archive_path.write_text(old_archive_path.read_text(encoding="utf-8"), encoding="utf-8")
             self.archive_path = str(archive_path)
-            self.status_label.setText(
-                f"Archive: {self.archive_path} — already-downloaded entries will be skipped."
-            )
         else:
             self.archive_path = None
 
@@ -901,39 +899,31 @@ class MainWindow(QWidget):
             )
             return
 
-        if not self._confirm_playlists():
-            return
-
+        # Disable UI immediately so the user can't double-submit
         self.download_btn.setEnabled(False)
         self.cancel_btn.setEnabled(True)
         self.add_queue_btn.setEnabled(False)
         self.url_input.setEnabled(False)
-        self._kick_next()
 
-    def _confirm_playlists(self) -> bool:
         playlist_urls = [u for u in self.batch if self._is_playlist_url(u)]
-        if not playlist_urls:
-            return True
-        self.status_label.setText(f"Inspecting {len(playlist_urls)} playlist URL(s)...")
-        dry_opts = {
-            "quiet": True, "no_warnings": True,
-            "skip_download": True, "extract_flat": True,
-        }
-        big: list[tuple[str, int, str, str]] = []
-        for p_url in playlist_urls:
-            try:
-                with YoutubeDL(dry_opts) as ydl:
-                    info = ydl.extract_info(p_url, download=False)
-            except Exception as e:
-                QMessageBox.warning(self, "Playlist error", f"{p_url}\n\n{e}")
-                return False
-            entries = (info or {}).get("entries") or []
-            n = info.get("playlist_count") or len(entries)
-            if n >= PLAYLIST_CONFIRM_THRESHOLD:
-                per_mb = 3 if self.audio_only else 15
-                est_mb = n * per_mb
-                est_str = f"{est_mb/1000:.1f} GB" if est_mb > 500 else f"{est_mb} MB"
-                big.append((p_url, n, est_str, info.get("title", "?")))
+        if playlist_urls:
+            # Inspect playlist sizes off the GUI thread
+            self.status_label.setText(
+                f"Inspecting {len(playlist_urls)} playlist URL(s)..."
+            )
+            self._inspect_worker = PlaylistInspectWorker(
+                playlist_urls, self.audio_only, PLAYLIST_CONFIRM_THRESHOLD
+            )
+            self._inspect_worker.progress.connect(self.status_label.setText)
+            self._inspect_worker.done.connect(self._on_inspect_done)
+            self._inspect_worker.error.connect(self._on_inspect_error)
+            self._inspect_worker.start()
+        else:
+            self._kick_next()
+
+    def _on_inspect_done(self, big: list) -> None:
+        """Called when PlaylistInspectWorker finishes without error."""
+        self._inspect_worker = None
         if big:
             lines = [f"• {title} — {n} entries (~{est})" for _, n, est, title in big]
             msg = "Large playlists detected:\n\n" + "\n".join(lines) + "\n\nContinue?"
@@ -942,8 +932,17 @@ class MainWindow(QWidget):
                 msg, QMessageBox.Yes | QMessageBox.No, QMessageBox.No,
             )
             if ans != QMessageBox.Yes:
-                return False
-        return True
+                self.status_label.setText("Download cancelled.")
+                self._reset_after_batch()
+                return
+        self._kick_next()
+
+    def _on_inspect_error(self, url: str, msg: str) -> None:
+        """Called when PlaylistInspectWorker hits a network/parse error."""
+        self._inspect_worker = None
+        QMessageBox.warning(self, "Playlist error", f"{url}\n\n{msg}")
+        self.status_label.setText("Download cancelled.")
+        self._reset_after_batch()
 
     def _kick_next(self) -> None:
         if self.batch_idx >= self.batch_total:
@@ -1013,6 +1012,18 @@ class MainWindow(QWidget):
         self._kick_next()
 
     def _cancel_download(self) -> None:
+        # If still inspecting playlists, cancel that first
+        if self._inspect_worker and self._inspect_worker.isRunning():
+            self._inspect_worker.done.disconnect()
+            self._inspect_worker.error.disconnect()
+            self._inspect_worker.progress.disconnect()
+            self._inspect_worker.cancel()
+            self._inspect_worker.wait(3000)
+            self._inspect_worker = None
+            self.status_label.setText("Cancelled.")
+            self._reset_after_batch()
+            return
+
         if hasattr(self, "worker") and self.worker.isRunning():
             # Disconnect signals first so any in-flight finished_ok/failed
             # callbacks don't call _kick_next() on the already-reset state.
