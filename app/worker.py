@@ -65,7 +65,7 @@ class DownloadWorker(QThread):
                 pct = int(d["downloaded_bytes"] / total * 100)
                 self.progress.emit(pct)
                 self.status.emit(
-                    f"{self.idx_label} Downloading... {pct}% @ {d.get('speed', 0)/1e6:.1f} MB/s"
+                    f"{self.idx_label} Downloading... {pct}% @ {(d.get('speed') or 0)/1e6:.1f} MB/s"
                 )
         elif d["status"] == "finished":
             self.progress.emit(100)

@@ -295,13 +295,11 @@ class ConvertWorker(QThread):
         """Return ffmpeg codec + quality arguments for the chosen format."""
         if self.fmt == "mp3":
             if self.cbr:
-                return ["-c:a", "libmp3lame", "-b:a", f"{self.bitrate}k",
-                        "-ar", str(self.sample_rate or 44100)]
+                return ["-c:a", "libmp3lame", "-b:a", f"{self.bitrate}k"]
             else:
                 # VBR quality: 0=best … 9=worst; map bitrate roughly
                 q = max(0, min(9, int((320 - self.bitrate) / 35)))
-                return ["-c:a", "libmp3lame", "-q:a", str(q),
-                        "-ar", str(self.sample_rate or 44100)]
+                return ["-c:a", "libmp3lame", "-q:a", str(q)]
 
         if self.fmt == "m4a":
             args = ["-c:a", "aac", "-profile:a", "aac_low"]

@@ -16,6 +16,7 @@ jobs:
   build:
     name: macOS Lite ZIP
     runs-on: macos-latest
+    timeout-minutes: 30
 
     env:
       APP_VERSION_RAW: ${{ github.event.inputs.version || github.ref_name }}

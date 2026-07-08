@@ -3,10 +3,11 @@
 # Run from the project root: bash build-linux.sh
 
 set -e
+set -o pipefail
 
 VENV=".venv"
 SPEC="chrisnov-media-toolkit.spec"
-OUT="dist/chrisnov-media-toolkit"
+OUT="dist/chrisnov-media-toolkit-lite"
 
 echo "==> Checking venv..."
 if [ ! -d "$VENV" ]; then

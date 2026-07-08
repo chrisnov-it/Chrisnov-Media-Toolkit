@@ -13,7 +13,7 @@ build_type = os.environ.get("BUILD_TYPE", "LITE").upper()
 is_bundled = build_type == "BUNDLED"
 is_macos = sys.platform == "darwin"
 
-if is_bundled and not is_macos:
+if is_bundled and sys.platform == 'win32':
     if not (Path('bin/ffmpeg.exe').exists() and Path('bin/ffprobe.exe').exists()):
         raise FileNotFoundError(
             "ERROR: ffmpeg.exe and ffprobe.exe must be present in the 'bin/' folder "
@@ -26,7 +26,7 @@ app_icon = (
     else ('icon.svg' if sys.platform not in ('win32', 'darwin') else None)
 )
 
-block_cipher = None
+block_cipher = None  # retained for legacy compat; not used by PyInstaller 6+
 
 a = Analysis(
     ['main.py'],
@@ -60,11 +60,10 @@ a = Analysis(
     ],
     win_no_prefer_redirects=False,
     win_private_assemblies=False,
-    cipher=block_cipher,
     noarchive=False,
 )
 
-pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
+pyz = PYZ(a.pure, a.zipped_data)
 
 exe = EXE(
     pyz,
