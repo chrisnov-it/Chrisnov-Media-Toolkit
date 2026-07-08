@@ -22,12 +22,12 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install dependencies
+      - name: Install ffmpeg, ffprobe, and dev deps
         run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
           python -m pip install --upgrade pip
           pip install PySide6 pytest
-          pip install -e . || true  # may fail if no project metadata yet; ok
-          python -c "import pytest"  # smoke check
 
       - name: Run pytest
         run: pytest -v
