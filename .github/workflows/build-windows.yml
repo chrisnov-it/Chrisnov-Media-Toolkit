@@ -50,30 +50,40 @@ jobs:
           Set-ExecutionPolicy -Scope Process Bypass -Force
           .\build-windows.ps1 -Type Both
 
-      - name: Package versioned executables
+      - name: Package versioned executables and ZIPs
         shell: pwsh
         run: |
-          $liteName = "chrisnov-media-toolkit-v${env:APP_VERSION}-windows-x64-lite.exe"
+          $liteName    = "chrisnov-media-toolkit-v${env:APP_VERSION}-windows-x64-lite.exe"
           $bundledName = "chrisnov-media-toolkit-v${env:APP_VERSION}-windows-x64-bundled.exe"
+          $liteZip     = "chrisnov-media-toolkit-v${env:APP_VERSION}-windows-x64-lite.zip"
+          $bundledZip  = "chrisnov-media-toolkit-v${env:APP_VERSION}-windows-x64-bundled.zip"
 
-          Copy-Item -LiteralPath "dist\chrisnov-media-toolkit-lite.exe" -Destination "dist\$liteName" -Force
+          # Rename bare executables
+          Copy-Item -LiteralPath "dist\chrisnov-media-toolkit-lite.exe"    -Destination "dist\$liteName"    -Force
           Copy-Item -LiteralPath "dist\chrisnov-media-toolkit-bundled.exe" -Destination "dist\$bundledName" -Force
 
-          (Get-FileHash -Algorithm SHA256 "dist\$liteName").Hash | Set-Content -Path "dist\$liteName.sha256"
-          (Get-FileHash -Algorithm SHA256 "dist\$bundledName").Hash | Set-Content -Path "dist\$bundledName.sha256"
+          # Wrap each exe in a zip (Chrome won't block a zip download)
+          Compress-Archive -Path "dist\$liteName"    -DestinationPath "dist\$liteZip"    -Force
+          Compress-Archive -Path "dist\$bundledName" -DestinationPath "dist\$bundledZip" -Force
 
-          "LITE_NAME=$liteName" | Out-File -FilePath $env:GITHUB_ENV -Append
+          # SHA256 for zips (primary download files)
+          (Get-FileHash -Algorithm SHA256 "dist\$liteZip").Hash    | Set-Content -Path "dist\$liteZip.sha256"
+          (Get-FileHash -Algorithm SHA256 "dist\$bundledZip").Hash | Set-Content -Path "dist\$bundledZip.sha256"
+
+          "LITE_NAME=$liteName"       | Out-File -FilePath $env:GITHUB_ENV -Append
           "BUNDLED_NAME=$bundledName" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "LITE_ZIP=$liteZip"         | Out-File -FilePath $env:GITHUB_ENV -Append
+          "BUNDLED_ZIP=$bundledZip"   | Out-File -FilePath $env:GITHUB_ENV -Append
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: chrisnov-media-toolkit-windows-x64
           path: |
-            dist/chrisnov-media-toolkit-v*-windows-x64-lite.exe
-            dist/chrisnov-media-toolkit-v*-windows-x64-lite.exe.sha256
-            dist/chrisnov-media-toolkit-v*-windows-x64-bundled.exe
-            dist/chrisnov-media-toolkit-v*-windows-x64-bundled.exe.sha256
+            dist/chrisnov-media-toolkit-v*-windows-x64-lite.zip
+            dist/chrisnov-media-toolkit-v*-windows-x64-lite.zip.sha256
+            dist/chrisnov-media-toolkit-v*-windows-x64-bundled.zip
+            dist/chrisnov-media-toolkit-v*-windows-x64-bundled.zip.sha256
           if-no-files-found: error
 
       - name: Upload to Cloudflare R2
@@ -86,11 +96,11 @@ jobs:
           R2_BUCKET: ${{ secrets.R2_BUCKET }}
         run: |
           $endpoint = "https://${env:R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
-          $scripts = Join-Path $PWD ".venv\Scripts"
+          $scripts = Join-Path $env:GITHUB_WORKSPACE ".venv\Scripts"
           $env:PATH = "$scripts;$env:PATH"
           $aws = (Get-Command aws -ErrorAction Stop).Source
 
-          & $aws s3 cp "dist\${env:LITE_NAME}" "s3://${env:R2_BUCKET}/app/windows/${env:LITE_NAME}" --endpoint-url $endpoint
-          & $aws s3 cp "dist\${env:LITE_NAME}.sha256" "s3://${env:R2_BUCKET}/app/windows/${env:LITE_NAME}.sha256" --endpoint-url $endpoint
-          & $aws s3 cp "dist\${env:BUNDLED_NAME}" "s3://${env:R2_BUCKET}/app/windows/${env:BUNDLED_NAME}" --endpoint-url $endpoint
-          & $aws s3 cp "dist\${env:BUNDLED_NAME}.sha256" "s3://${env:R2_BUCKET}/app/windows/${env:BUNDLED_NAME}.sha256" --endpoint-url $endpoint
+          & $aws s3 cp "dist\${env:LITE_ZIP}"         "s3://${env:R2_BUCKET}/app/windows/${env:LITE_ZIP}"         --endpoint-url $endpoint
+          & $aws s3 cp "dist\${env:LITE_ZIP}.sha256"  "s3://${env:R2_BUCKET}/app/windows/${env:LITE_ZIP}.sha256"  --endpoint-url $endpoint
+          & $aws s3 cp "dist\${env:BUNDLED_ZIP}"        "s3://${env:R2_BUCKET}/app/windows/${env:BUNDLED_ZIP}"        --endpoint-url $endpoint
+          & $aws s3 cp "dist\${env:BUNDLED_ZIP}.sha256" "s3://${env:R2_BUCKET}/app/windows/${env:BUNDLED_ZIP}.sha256" --endpoint-url $endpoint
