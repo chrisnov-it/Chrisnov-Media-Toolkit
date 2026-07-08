@@ -1023,8 +1023,12 @@ class MainWindow(QWidget):
                 self.worker.failed.disconnect()
             except RuntimeError:
                 pass
-            self.worker.terminate()
-            self.worker.wait(3000)
+            # Ask yt-dlp to stop cleanly via the cancel flag; give it up to
+            # 5 s to honour the request before falling back to terminate().
+            self.worker.cancel()
+            if not self.worker.wait(5000):
+                self.worker.terminate()
+                self.worker.wait(2000)
             cleaned = self._cleanup_recent_downloads()
             if cleaned:
                 self.status_label.setText(

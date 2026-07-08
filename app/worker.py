@@ -11,6 +11,10 @@ from yt_dlp import YoutubeDL
 from .constants import VIDEO_CONTAINERS, AUDIO_CONTAINERS
 
 
+class _CancelledError(Exception):
+    """Raised from the yt-dlp progress hook to abort a download cleanly."""
+
+
 class DownloadWorker(QThread):
     progress = Signal(int)        # 0-100
     status = Signal(str)          # status message
@@ -32,6 +36,12 @@ class DownloadWorker(QThread):
         self.clean_tags = clean_tags
         self.playlist = playlist
         self.archive_path = archive_path
+        self._cancelled = False
+
+    def cancel(self) -> None:
+        """Request cancellation. The progress hook will raise on the next
+        yt-dlp callback, aborting the download without killing the thread."""
+        self._cancelled = True
 
     def run(self) -> None:
         try:
@@ -39,6 +49,8 @@ class DownloadWorker(QThread):
             self.status.emit(f"{self.idx_label} Resolving info...")
             with YoutubeDL(ytdl_opts) as ydl:
                 info = ydl.extract_info(self.url, download=True)
+            if self._cancelled:
+                return
             if isinstance(info, dict) and "entries" in info and info["entries"]:
                 paths = self._collect_saved_paths(info, ydl)
                 if paths:
@@ -55,10 +67,15 @@ class DownloadWorker(QThread):
                     # caller can find the actual file on disk for rename/cleanup.
                     saved = str(Path(saved).with_suffix(f".{self.container}"))
                 self.finished_ok.emit(saved)
+        except _CancelledError:
+            pass  # clean cancel — no error signal
         except Exception as e:
-            self.failed.emit(str(e))
+            if not self._cancelled:
+                self.failed.emit(str(e))
 
     def _hook(self, d: dict) -> None:
+        if self._cancelled:
+            raise _CancelledError()
         if d["status"] == "downloading":
             total = d.get("total_bytes") or d.get("total_bytes_estimate")
             if total:
