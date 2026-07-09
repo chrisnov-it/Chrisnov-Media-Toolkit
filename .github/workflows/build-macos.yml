@@ -13,7 +13,7 @@ on:
       - "v*"
 
 jobs:
-  build-arm64:
+  build:
     name: macOS ARM64 Lite ZIP (Apple Silicon)
     runs-on: macos-latest
     timeout-minutes: 15
@@ -27,7 +27,7 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Set up Python (ARM64)
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -47,23 +47,9 @@ jobs:
         run: |
           pyinstaller chrisnov-media-toolkit.spec
 
-      - name: Verify ARM64 architecture
-        run: |
-          ls -la dist/
-          EXE=$(find dist -name "Chrisnov Media Toolkit" -type f -executable 2>/dev/null | head -1)
-          if [ -z "$EXE" ]; then
-            echo "::error::Executable not found in dist/"
-            exit 1
-          fi
-          file "$EXE"
-          file "$EXE" | grep -q "arm64" || {
-            echo "::error::Expected arm64 binary, but file output above did not include 'arm64'"
-            exit 1
-          }
-
       - name: Package app as ZIP
         run: |
-          ZIP_NAME="chrisnov-media-toolkit-v${APP_VERSION}-macos-arm64-lite.zip"
+          ZIP_NAME="chrisnov-media-toolkit-v${APP_VERSION}-macos-lite.zip"
           ditto -c -k --sequesterRsrc --keepParent "dist/Chrisnov Media Toolkit.app" "dist/${ZIP_NAME}"
           (cd dist && shasum -a 256 "${ZIP_NAME}") > "dist/${ZIP_NAME}.sha256"
           echo "ZIP_NAME=${ZIP_NAME}" >> "$GITHUB_ENV"
@@ -71,90 +57,10 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: chrisnov-media-toolkit-macos-arm64-lite
+          name: chrisnov-media-toolkit-macos-lite
           path: |
-            dist/chrisnov-media-toolkit-v*-macos-arm64-lite.zip
-            dist/chrisnov-media-toolkit-v*-macos-arm64-lite.zip.sha256
-          if-no-files-found: error
-
-      - name: Upload to Cloudflare R2
-        env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-          AWS_DEFAULT_REGION: auto
-          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
-          R2_BUCKET: ${{ secrets.R2_BUCKET }}
-        run: |
-          ENDPOINT="https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
-          aws s3 cp "dist/${ZIP_NAME}"        "s3://${R2_BUCKET}/app/macos/${ZIP_NAME}"        --endpoint-url "${ENDPOINT}"
-          aws s3 cp "dist/${ZIP_NAME}.sha256" "s3://${R2_BUCKET}/app/macos/${ZIP_NAME}.sha256" --endpoint-url "${ENDPOINT}"
-
-  build-intel:
-    name: macOS x86_64 Lite ZIP (Intel)
-    runs-on: macos-latest   # Apple Silicon host installs Intel Python via setup-python
-    timeout-minutes: 15
-
-    env:
-      APP_VERSION_RAW: ${{ github.event.inputs.version || github.ref_name }}
-      BUILD_TYPE: LITE
-      MACOSX_DEPLOYMENT_TARGET: "12.0"   # last macOS supported on MacBook Air 2015
-      HOMEBREW_NO_AUTO_UPDATE: 1
-
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-
-      - name: Set up Intel Python on Apple Silicon
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-          architecture: "x64"   # downloads Intel x86_64 build, PyInstaller bundles x86_64 binary
-
-      - name: Install Python dependencies
-        run: |
-          python -m pip install --upgrade pip
-          # --only-binary=:all: prevents any fallback to source compilation
-          # (which would rebuild as aarch64 on Apple Silicon).
-          python -m pip install PySide6 yt-dlp pyinstaller awscli --only-binary=:all:
-
-      - name: Prepare build metadata
-        run: |
-          VERSION="${APP_VERSION_RAW#v}"
-          echo "APP_VERSION=${VERSION}" >> "$GITHUB_ENV"
-          echo "APP_BUILD_NUMBER=${GITHUB_RUN_NUMBER}" >> "$GITHUB_ENV"
-
-      - name: Build unsigned macOS app
-        run: |
-          pyinstaller chrisnov-media-toolkit.spec
-
-      - name: Verify x86_64 architecture
-        run: |
-          ls -la dist/
-          EXE=$(find dist -name "Chrisnov Media Toolkit" -type f -executable 2>/dev/null | head -1)
-          if [ -z "$EXE" ]; then
-            echo "::error::Executable not found in dist/"
-            exit 1
-          fi
-          file "$EXE"
-          file "$EXE" | grep -q "x86_64" || {
-            echo "::error::Expected x86_64 binary, but file output above did not include 'x86_64'"
-            exit 1
-          }
-
-      - name: Package app as ZIP
-        run: |
-          ZIP_NAME="chrisnov-media-toolkit-v${APP_VERSION}-macos-x86_64-lite.zip"
-          ditto -c -k --sequesterRsrc --keepParent "dist/Chrisnov Media Toolkit.app" "dist/${ZIP_NAME}"
-          (cd dist && shasum -a 256 "${ZIP_NAME}") > "dist/${ZIP_NAME}.sha256"
-          echo "ZIP_NAME=${ZIP_NAME}" >> "$GITHUB_ENV"
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: chrisnov-media-toolkit-macos-x86_64-lite
-          path: |
-            dist/chrisnov-media-toolkit-v*-macos-x86_64-lite.zip
-            dist/chrisnov-media-toolkit-v*-macos-x86_64-lite.zip.sha256
+            dist/chrisnov-media-toolkit-v*-macos-lite.zip
+            dist/chrisnov-media-toolkit-v*-macos-lite.zip.sha256
           if-no-files-found: error
 
       - name: Upload to Cloudflare R2
