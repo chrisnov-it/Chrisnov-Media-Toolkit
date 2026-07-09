@@ -49,7 +49,12 @@ jobs:
 
       - name: Verify ARM64 architecture
         run: |
-          EXE="dist/Chrisnov Media Toolkit.app/Contents/MacOS/Chrisnov Media Toolkit"
+          ls -la dist/
+          EXE=$(find dist -name "Chrisnov Media Toolkit" -type f -executable 2>/dev/null | head -1)
+          if [ -z "$EXE" ]; then
+            echo "::error::Executable not found in dist/"
+            exit 1
+          fi
           file "$EXE"
           file "$EXE" | grep -q "arm64" || {
             echo "::error::Expected arm64 binary, but file output above did not include 'arm64'"
@@ -124,7 +129,12 @@ jobs:
 
       - name: Verify x86_64 architecture
         run: |
-          EXE="dist/Chrisnov Media Toolkit.app/Contents/MacOS/Chrisnov Media Toolkit"
+          ls -la dist/
+          EXE=$(find dist -name "Chrisnov Media Toolkit" -type f -executable 2>/dev/null | head -1)
+          if [ -z "$EXE" ]; then
+            echo "::error::Executable not found in dist/"
+            exit 1
+          fi
           file "$EXE"
           file "$EXE" | grep -q "x86_64" || {
             echo "::error::Expected x86_64 binary, but file output above did not include 'x86_64'"
