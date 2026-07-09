@@ -16,17 +16,18 @@ jobs:
   build-arm64:
     name: macOS ARM64 Lite ZIP (Apple Silicon)
     runs-on: macos-latest
-    timeout-minutes: 30
+    timeout-minutes: 15
 
     env:
       APP_VERSION_RAW: ${{ github.event.inputs.version || github.ref_name }}
       BUILD_TYPE: LITE
+      HOMEBREW_NO_AUTO_UPDATE: 1
 
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Set up Python
+      - name: Set up Python (ARM64)
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -34,7 +35,7 @@ jobs:
       - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install PySide6 yt-dlp pyinstaller awscli
+          python -m pip install PySide6 yt-dlp pyinstaller awscli --only-binary=:all:
 
       - name: Prepare build metadata
         run: |
@@ -45,6 +46,15 @@ jobs:
       - name: Build unsigned macOS app
         run: |
           pyinstaller chrisnov-media-toolkit.spec
+
+      - name: Verify ARM64 architecture
+        run: |
+          EXE="dist/Chrisnov Media Toolkit.app/Contents/MacOS/Chrisnov Media Toolkit"
+          file "$EXE"
+          file "$EXE" | grep -q "arm64" || {
+            echo "::error::Expected arm64 binary, but file output above did not include 'arm64'"
+            exit 1
+          }
 
       - name: Package app as ZIP
         run: |
@@ -76,26 +86,31 @@ jobs:
 
   build-intel:
     name: macOS x86_64 Lite ZIP (Intel)
-    runs-on: macos-13
-    timeout-minutes: 30
+    runs-on: macos-latest   # Apple Silicon host installs Intel Python via setup-python
+    timeout-minutes: 15
 
     env:
       APP_VERSION_RAW: ${{ github.event.inputs.version || github.ref_name }}
       BUILD_TYPE: LITE
+      MACOSX_DEPLOYMENT_TARGET: "12.0"   # last macOS supported on MacBook Air 2015
+      HOMEBREW_NO_AUTO_UPDATE: 1
 
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Set up Python
+      - name: Set up Intel Python on Apple Silicon
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+          architecture: "x64"   # downloads Intel x86_64 build, PyInstaller bundles x86_64 binary
 
       - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install PySide6 yt-dlp pyinstaller awscli
+          # --only-binary=:all: prevents any fallback to source compilation
+          # (which would rebuild as aarch64 on Apple Silicon).
+          python -m pip install PySide6 yt-dlp pyinstaller awscli --only-binary=:all:
 
       - name: Prepare build metadata
         run: |
@@ -106,6 +121,15 @@ jobs:
       - name: Build unsigned macOS app
         run: |
           pyinstaller chrisnov-media-toolkit.spec
+
+      - name: Verify x86_64 architecture
+        run: |
+          EXE="dist/Chrisnov Media Toolkit.app/Contents/MacOS/Chrisnov Media Toolkit"
+          file "$EXE"
+          file "$EXE" | grep -q "x86_64" || {
+            echo "::error::Expected x86_64 binary, but file output above did not include 'x86_64'"
+            exit 1
+          }
 
       - name: Package app as ZIP
         run: |
