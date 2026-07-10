@@ -77,7 +77,6 @@ jobs:
 
       - name: Submit Windows binaries to VirusTotal
         id: vt
-        if: ${{ secrets.VIRUSTOTAL_API_KEY != '' }}
         shell: pwsh
         env:
           VT_API_KEY: ${{ secrets.VIRUSTOTAL_API_KEY }}
