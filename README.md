@@ -65,6 +65,14 @@ Windows application icon; the in-app window icon still uses `icon.svg`.
 > currently avoid requiring UPX because packed executables can trigger antivirus
 > false positives more often than unpacked PyInstaller builds.
 
+### macOS (prebuilt zip)
+
+Prebuilt `.zip` releases are produced by `.github/workflows/build-macos.yml`
+and attached to GitHub Releases for both Apple Silicon
+(`-macos-arm64-lite.zip`) and Intel (`-macos-x86_64-lite.zip`).
+See [`docs/OLD-MAC-WORKAROUND.md`](docs/OLD-MAC-WORKAROUND.md) for
+Intel-Mac instructions and SHA256 verification.
+
 ## Setup
 
 ### Linux Mint (and other Debian/Ubuntu)
