@@ -4,6 +4,31 @@ All notable changes to this project are documented here.
 
 ---
 
+## [Unreleased]
+
+### Added
+
+- **Prebuilt x86_64 macOS zip via `macos-15-intel` matrix leg**
+  (`.github/workflows/build-macos.yml`)
+  Every release now ships both Apple Silicon and Intel zips. The
+  x86_64 leg runs on GitHub's `macos-15-intel` runner (4 vCPU /
+  14 GB RAM, supported until August 2027) and finishes in ~2 min
+  in parallel with the ARM64 leg.
+
+### Changed
+
+- Bumped GitHub Actions: `actions/checkout` v4→v5,
+  `actions/setup-python` v5→v6, `actions/upload-artifact` v4→v6.
+  Resolves the "Node.js 20 is deprecated" annotation GitHub
+  surfaced after the September 2025 runner deprecation.
+- Rewrote `docs/OLD-MAC-WORKAROUND.md` so the prebuilt x86_64
+  zip is the recommended path (Option 1); source-run and local
+  build remain as fallbacks. The previous "Why we don't ship
+  prebuilt Intel from CI" section is retired — it cited the now-
+  deprecated `macos-13` runner.
+
+---
+
 ## [0.1.0-beta.2] — 2026-07-08
 
 ### Fixed
