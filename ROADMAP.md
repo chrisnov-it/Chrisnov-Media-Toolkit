@@ -24,14 +24,19 @@ sharing it more broadly.
   - Builds a native x64 binary on `ubuntu-latest`.
   - Packages the binary as a `.tar.gz` artifact for Linux Mint testing.
 - macOS Lite build workflow via GitHub Actions:
-  - Builds a native unsigned `.app` on a macOS runner.
-  - Packages the app as a ZIP artifact for internal beta testing.
+  - Builds native unsigned `.app` zips via a `macos-latest` +
+    `macos-15-intel` matrix (Apple Silicon + Intel x86_64).
+  - Each leg produces its own ZIP artifact and uploads to R2
+    under `app/macos/`.
 - Build pipeline fully validated: PyInstaller 6.x compatibility confirmed,
   sha256 checksums correct for end-user verification, Retina display fixed.
 
 ## Short-Term Priorities
 
 - ~~Run the macOS GitHub Actions build and validate the ZIP on a real Mac.~~ *(build done, tester needed)*
+- Validate the prebuilt x86_64 macOS zip on a real Intel Mac
+  (e.g. friend's MacBook Air 2015) before declaring Intel support
+  production-ready.
 - Test the Windows beta build on multiple Windows 11 machines.
 - Run the Linux GitHub Actions build and validate the `.tar.gz` on Linux Mint.
 - Verify taskbar/window icon behavior across source run and built `.exe`.
