@@ -14,13 +14,24 @@ on:
 
 jobs:
   build:
-    name: macOS ARM64 Lite ZIP (Apple Silicon)
-    runs-on: macos-latest
-    timeout-minutes: 15
+    name: macOS ${{ matrix.arch }} Lite ZIP
+    runs-on: ${{ matrix.runs_on }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64
+            runs_on: macos-latest
+            zip_suffix: arm64
+          - arch: x86_64
+            runs_on: macos-15-intel
+            zip_suffix: x86_64
 
     env:
       APP_VERSION_RAW: ${{ github.event.inputs.version || github.ref_name }}
       BUILD_TYPE: LITE
+      ZIP_SUFFIX: ${{ matrix.zip_suffix }}
       HOMEBREW_NO_AUTO_UPDATE: 1
 
     steps:
@@ -49,7 +60,7 @@ jobs:
 
       - name: Package app as ZIP
         run: |
-          ZIP_NAME="chrisnov-media-toolkit-v${APP_VERSION}-macos-lite.zip"
+          ZIP_NAME="chrisnov-media-toolkit-v${APP_VERSION}-macos-${ZIP_SUFFIX}-lite.zip"
           ditto -c -k --sequesterRsrc --keepParent "dist/Chrisnov Media Toolkit.app" "dist/${ZIP_NAME}"
           (cd dist && shasum -a 256 "${ZIP_NAME}") > "dist/${ZIP_NAME}.sha256"
           echo "ZIP_NAME=${ZIP_NAME}" >> "$GITHUB_ENV"
@@ -57,10 +68,10 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: chrisnov-media-toolkit-macos-lite
+          name: chrisnov-media-toolkit-macos-${{ matrix.zip_suffix }}-lite
           path: |
-            dist/chrisnov-media-toolkit-v*-macos-lite.zip
-            dist/chrisnov-media-toolkit-v*-macos-lite.zip.sha256
+            dist/chrisnov-media-toolkit-v*-macos-${{ matrix.zip_suffix }}-lite.zip
+            dist/chrisnov-media-toolkit-v*-macos-${{ matrix.zip_suffix }}-lite.zip.sha256
           if-no-files-found: error
 
       - name: Upload to Cloudflare R2
