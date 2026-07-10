@@ -1,19 +1,62 @@
 # Running Chrisnov Media Toolkit on Intel Macs (2015–2020 hardware)
 
-The prebuilt `.zip` release is currently ARM64-only. Apple Silicon Mac
-owners (M1/M2/M3+) can run it natively; Intel Macs cannot — Rosetta is
-emulation **from** ARM **to Intel**, and Apple does not ship an inverse
-emulator.
+Chrisnov Media Toolkit now ships prebuilt `.zip` releases for both
+Apple Silicon (`*-macos-arm64-lite.zip`) and Intel
+(`*-macos-x86_64-lite.zip`) Macs. The x86_64 build runs on GitHub's
+`macos-15-intel` runner and is published alongside the ARM64 zip on
+every release.
 
-Below are three practical options for users on Intel hardware.
+If you have a MacBook Air 2015, MacBook Pro 2017, or any other 2015–2020
+Intel Mac running macOS 12 Monterey or later, the prebuilt x86_64 zip
+is the recommended path.
 
 ---
 
-## Option 1 — Run from source (recommended for one-off testers)
+## Option 1 — Download the prebuilt x86_64 zip (recommended)
 
-PySide6 6.x and Python 3.12 wheel bundles support macOS 12 Monterey and
-later. The MacBook Air 2015 (last supported macOS 12) and most 2017–2020
-Intel Macs satisfy this. Total runtime setup is ~3 minutes.
+1. Visit the [Releases page](https://github.com/chrisnov-it/Chrisnov-Media-Toolkit/releases)
+   on GitHub.
+2. Download `chrisnov-media-toolkit-v<version>-macos-x86_64-lite.zip`
+   under the latest release.
+3. Double-click the zip to extract `Chrisnov Media Toolkit.app`.
+4. Drag the `.app` into your Applications folder.
+5. Right-click the `.app` → **Open** the first time (Gatekeeper
+   warning, because the binary is unsigned). Subsequent launches are
+   normal double-click.
+
+Install FFmpeg once via Homebrew — the Lite build does not bundle it:
+
+```bash
+brew install ffmpeg
+```
+
+FFmpeg is discovered automatically on macOS.
+
+### Verifying the download
+
+Each release zip ships with a `.sha256` checksum file. Verify your
+download before extracting:
+
+```bash
+shasum -a 256 -c chrisnov-media-toolkit-v<version>-macos-x86_64-lite.zip.sha256
+```
+
+Output should end with `OK`.
+
+### System requirements
+
+- macOS 12 Monterey or later (macBook Air 2015's last supported OS)
+- ~250 MB free disk space for the unpacked `.app`
+- Internet access for downloads and `yt-dlp` fetches
+- FFmpeg on `$PATH` (Homebrew install above)
+
+---
+
+## Option 2 — Run from source
+
+Useful if you want the latest unreleased code, or if the prebuilt zip
+is blocked by your network or admin policy. PySide6 6.x and Python 3.12
+wheels support macOS 12 Monterey and later. Setup is ~3 minutes.
 
 ```bash
 # Open Terminal and ensure Xcode CLI tools are installed
@@ -36,28 +79,28 @@ pip install -U pip PySide6 yt-dlp
 python main.py
 ```
 
-The app will run identically to the ARM64 zip build. Title cleanup,
+The app runs identically to the prebuilt `.app`. Title cleanup,
 playlist workflow, converters, and drag-and-drop all work.
 
 ### Caveats
 
-- Launching is slower (about 1 second vs 0.2 s for the prebuilt`.app`)
+- Launching is slower (about 1 second vs 0.2 s for the prebuilt `.app`)
   because PySide6 has to spin up from the source distribution on every
   start.
 - Gatekeeper **does not** complain because you are running a Python
   script, not an unsigned binary. No `xattr` workaround needed.
-- Path to FFmpeg is discovered automatically via Homebrew on macOS.
 - Tested on macOS 12.7 (Monterey) and macOS 13.6 (Ventura) on
   MacBook Air 2015 (Intel HD 6000) and MacBook Pro 2017 (Radeon Pro).
-- macOS 10 (Catalina) and 11 (Big Sur): untested but unlikely to work;
+- macOS 10 (Catalina) and 11 (Big Sur): untested and unlikely to work;
   PySide6 wheels require macOS 12+.
 
 ---
 
-## Option 2 — Build your own `.app` locally on the Intel Mac
+## Option 3 — Build your own `.app` locally
 
-If you prefer the standalone `.app` experience, build it yourself.
-First-time setup takes ~5 min; each subsequent build ~2 min.
+If you want a standalone `.app` matching the exact CI artifact, build
+it yourself. First-time setup takes ~5 min; each subsequent build
+~2 min on Intel hardware.
 
 ```bash
 brew install python@3.12 ffmpeg pyinstaller
@@ -77,61 +120,35 @@ The first launch needs right-click → Open because the binary is
 unsigned (Gatekeeper warning). Subsequent launches are double-click
 normal.
 
-If you want to ship this `.app` to other Intel Mac owners, zip the
-`dist/Chrisnov Media Toolkit.app` folder (not the binary inside — zip
-the whole bundle so resources stay intact):
-
-```bash
-ditto -c -k --sequesterRsrc --keepParent \
-  "dist/Chrisnov Media Toolkit.app" \
-  "Chrisnov-Media-Toolkit-Intel.zip"
-```
-
 ---
 
-## Option 3 — Sponsor an x86_64 build run (advanced)
+## CI configuration
 
-If you have access to another x86_64 Mac (2017 MacBook Pro, Intel NUC,
-Linux x86_64 VM with macOS guest — only if you have valid macOS
-license), run the Apple Silicon job pattern from `build-macos.yml`
-locally with `BUILD_TYPE=LITE python3 -m pyinstaller ...` and zip the
-result.
+The x86_64 zip is built by `.github/workflows/build-macos.yml` using
+a matrix over two runners:
 
-Then upload to Cloudflare R2 using the same S3 command line as the CI
-workflow:
+- `macos-latest` → Apple Silicon (M1/M2/M3+)
+- `macos-15-intel` → x86_64 Intel (4 vCPU / 14 GB RAM, supported
+  until August 2027)
 
-```bash
-export R2_ACCOUNT_ID="..."
-export R2_ACCESS_KEY_ID="..."
-export R2_SECRET_ACCESS_KEY="..."
-export R2_BUCKET="chrisnov-media-toolkit-releases"
+Each matrix leg publishes a separate zip and uploads it to Cloudflare
+R2 under `app/macos/`. Both legs complete in roughly 3 minutes total
+when run in parallel.
 
-aws s3 cp "Chrisnov-Media-Toolkit-Intel.zip" \
-  "s3://${R2_BUCKET}/app/macos/chrisnov-media-toolkit-v<version>-macos-x86_64-lite.zip" \
-  --endpoint-url "https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
-```
+### Why we paused the Intel build (now resumed)
 
----
-
-## Why we don't ship a prebuilt Intel `.zip` from CI
-
-GitHub's hosted runners supply only `macos-latest` (Apple Silicon) and
-`macos-13` (Intel) for macOS jobs. The Intel pool is small and transient
-during peak hours — a single x86_64 build can sit in queue for hours
-while ARM64 builds complete in under two minutes. Spending roughly an
-extra six CI-minutes per release per platform does not justify the
-delay for an increasingly small share of the user base.
-
-If x86_64 demand grows (e.g. your blog post gets traction in Indonesia
-among secondhand MacBook owners), we can revisit and split Intel into a
-separate manual-only workflow with a 24-hour timeout.
+GitHub's older `macos-13` Intel runner was retired in December 2025;
+builds on that image could queue for hours. The replacement
+`macos-15-intel` runner has more CPU and RAM than the Apple Silicon
+runner and a much shorter queue, so resuming the x86_64 leg became
+worthwhile.
 
 ---
 
 ## Verification
 
-After installing, click the **About** button in the header. It should
-report:
+After installing (any option above), click the **About** button in the
+header. It should report:
 
 - Platform: macOS
 - Python: 3.12.x
