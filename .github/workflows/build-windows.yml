@@ -7,7 +7,7 @@ on:
       version:
         description: "Release version, for example 0.1.0-beta.1"
         required: true
-        default: "0.1.0-beta.3"
+        default: "0.1.0-beta.2"
   push:
     tags:
       - "v*"
@@ -74,46 +74,6 @@ jobs:
           "BUNDLED_NAME=$bundledName" | Out-File -FilePath $env:GITHUB_ENV -Append
           "LITE_ZIP=$liteZip"         | Out-File -FilePath $env:GITHUB_ENV -Append
           "BUNDLED_ZIP=$bundledZip"   | Out-File -FilePath $env:GITHUB_ENV -Append
-
-      - name: Submit Windows binaries to VirusTotal
-        id: vt
-        shell: pwsh
-        env:
-          VT_API_KEY: ${{ secrets.VIRUSTOTAL_API_KEY }}
-        run: |
-          # VirusTotal free tier caps file size at 650 MB. The Bundled variant
-          # bundles FFmpeg+FFprobe and easily crosses that limit, so we skip
-          # it gracefully. Lite ships without FFmpeg so it almost always fits.
-          $VT_MAX_BYTES = 650MB
-          foreach ($name in @($env:LITE_NAME, $env:BUNDLED_NAME)) {
-            $path = Join-Path "dist" $name
-            if (-not (Test-Path $path)) {
-              Write-Host "::warning::$name not found at $path — skipping VirusTotal submission"
-              continue
-            }
-            $size = (Get-Item $path).Length
-            if ($size -gt $VT_MAX_BYTES) {
-              $sizeMb = [math]::Round($size / 1MB, 1)
-              Write-Host "::warning::$name is ${sizeMb} MB which exceeds VirusTotal's 650 MB limit — skipping"
-              continue
-            }
-            try {
-              Write-Host "Uploading $name to VirusTotal..."
-              $form = @{ file = Get-Item $path }
-              $resp = Invoke-RestMethod `
-                -Uri 'https://www.virustotal.com/api/v3/files' `
-                -Method Post `
-                -Headers @{ 'x-apikey' = $VT_API_KEY } `
-                -Form $form `
-                -TimeoutSec 180
-              $analysisId = $resp.data.id
-              $analysisUrl = "https://www.virustotal.com/gui/file/$analysisId"
-              Write-Host "Submitted $name — $analysisUrl"
-              "$name|$analysisUrl" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-            } catch {
-              Write-Host "::warning::VirusTotal submission failed for ${name}: $_"
-            }
-          }
 
       - name: Upload artifact
         uses: actions/upload-artifact@v6

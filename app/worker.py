@@ -101,7 +101,7 @@ class DownloadWorker(QThread):
         if self.audio_only:
             codec = {"mp3": "mp3", "m4a": "aac", "opus": "opus"}.get(self.container, "mp3")
             opts.update({
-                "format": "ba",
+                "format": "ba/b",
                 # Use %(ext)s — FFmpegExtractAudio rewrites the extension after
                 # conversion, so hardcoding it here causes a double extension
                 # (e.g. "title.m4a.m4a").
