@@ -9,6 +9,8 @@ import os
 import sys
 from pathlib import Path
 
+from PyInstaller.utils.hooks import collect_submodules, collect_data_files
+
 build_type = os.environ.get("BUILD_TYPE", "LITE").upper()
 is_bundled = build_type == "BUNDLED"
 is_macos = sys.platform == "darwin"
@@ -28,19 +30,17 @@ app_icon = (
 
 block_cipher = None  # retained for legacy compat; not used by PyInstaller 6+
 
+yt_dlp_submodules = collect_submodules('yt_dlp')
+yt_dlp_datas = collect_data_files('yt_dlp')
+
 a = Analysis(
     ['main.py'],
     pathex=[],
     binaries=[],
     datas=[
-        # Bundle the SVG icon so it's available at runtime inside the package
         ('icon.svg', '.'),
-    ] + ([('bin/ffmpeg.exe', 'bin'), ('bin/ffprobe.exe', 'bin')] if is_bundled and sys.platform == 'win32' else []),
-    hiddenimports=[
-        # yt-dlp extractor plugins are loaded dynamically — tell PyInstaller about them
-        'yt_dlp.extractor',
-        'yt_dlp.postprocessor',
-        # PySide6 platform plugins
+    ] + yt_dlp_datas + ([('bin/ffmpeg.exe', 'bin'), ('bin/ffprobe.exe', 'bin')] if is_bundled and sys.platform == 'win32' else []),
+    hiddenimports=yt_dlp_submodules + [
         'PySide6.QtSvg',
         'PySide6.QtSvgWidgets',
     ],
