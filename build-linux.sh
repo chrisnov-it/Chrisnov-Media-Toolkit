@@ -16,8 +16,10 @@ if [ ! -d "$VENV" ]; then
     exit 1
 fi
 
-echo "==> Installing / upgrading PyInstaller..."
-"$VENV/bin/pip" install -q --upgrade pyinstaller
+echo "==> Installing PyInstaller..."
+# Pin to a known-good version to avoid CI surprise breakage.
+# Bump deliberately after local verification, not automatically.
+"$VENV/bin/pip" install -q pyinstaller==6.17.0
 
 echo "==> Cleaning previous build..."
 rm -rf build/ dist/

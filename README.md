@@ -8,8 +8,17 @@ i5-5200U / 7GB RAM / Intel HD 5500).
 
 - Paste any yt-dlp-supported URL (YouTube and 1000+ sites)
 - **Audio-only mode** — extracts soundtrack with selectable bitrate (96/128/160/192/256/320 kbps)
-- **Smart output folder** — automatically switches to `~/Music` when Audio only is on,
-  back to `~/Videos` when off (only if you haven't manually changed the folder)
+- **Remembers last folder** — the output folder you picked for each mode
+  (video download, audio download, audio convert, video convert) is saved and
+  restored the next time you open the app. No more falling back to defaults
+  every launch.
+- **Open Folder button** — opens the currently selected output directory in
+  your system file manager, on all three tabs.
+- **Pre-download info** — the **Info** button shows the video title, duration,
+  and an estimated output size before you start downloading.
+- **Embed metadata & thumbnail** — writes title/artist tags into the file
+  (on by default) and can embed the cover thumbnail (off by default). Thumbnail
+  embedding is available for mp3, m4a, mp4, and mkv.
 - **Title cleanup** — strips "Official Music Video", "Video Lirik", etc. from filenames
   (editable tag list in GUI; includes common Indonesian tags out of the box)
 - Resolution presets: Best / 1080p / 720p / 480p / 360p
@@ -22,7 +31,7 @@ i5-5200U / 7GB RAM / Intel HD 5500).
   `~/.config/chrisnov-media-toolkit/archive_*.txt` (separate for audio vs video).
   Anything re-queued gets skipped automatically.
 - **Drag-and-drop** — drop a URL, text, or a text file of URLs onto the window
-- Pick output folder (defaults to `~/Videos` or `~/Music` depending on mode)
+- Pick output folder (defaults to `~/Videos` or `~/Music` on first run)
 - Live progress + speed (per item, e.g. "[2/5] Downloading...")
 - Cancel mid-batch
 - Queue clears automatically after each batch finishes
@@ -175,15 +184,17 @@ Private use.
 4. Pilih mode unduhan:
    - Mau **video**? Biarkan semua pengaturan pada default.
    - Mau **audio/musik saja**? Centang **Audio only** — aplikasi otomatis
-     pindahkan folder tujuan ke `~/Music` dan pilihkan format audio.
+     menyesuaikan folder tujuan dan memilihkan format audio.
 
-5. Klik **Start**. Lihat progress bar dan pesan di bagian bawah jendela.
+5. (Opsional) Klik **Info** untuk melihat judul, durasi, dan perkiraan ukuran
+   file sebelum mengunduh.
 
-6. Setelah selesai, file tersimpan di:
-   - `~/Videos` — untuk video
-   - `~/Music` — untuk audio
+6. Klik **Start**. Lihat progress bar dan pesan di bagian bawah jendela.
 
-7. Daftar antrian otomatis bersih setelah semua selesai diunduh.
+7. Setelah selesai, file tersimpan di folder tujuan yang dipilih. Klik **Open**
+   di sebelah tombol Browse untuk langsung membukanya di file manager.
+
+8. Daftar antrian otomatis bersih setelah semua selesai diunduh.
 
 ### Tips Cepat
 
@@ -209,6 +220,18 @@ besar. Untuk musik, 192 kbps sudah sangat baik. 320 kbps untuk kualitas maksimal
 
 **Resolution** — Resolusi video. "Best" = kualitas terbaik yang tersedia. 720p
 sudah cukup untuk kebanyakan layar laptop.
+
+**Info** — Tombol di sebelah **Start**. Menampilkan judul video, durasi, dan
+perkiraan ukuran hasil unduh tanpa benar-benar mengunduh. Berguna untuk
+memperkirakan pemakaian disk.
+
+**Embed metadata / Embed thumbnail** — Menulis tag (judul, artis) ke dalam
+file hasil unduh. "Embed thumbnail" menyematkan gambar mini ke file (tersedia
+untuk mp3, m4a, mp4, mkv). Metadata otomatis memakai judul lagu yang bersih
+bila tersedia.
+
+**Open** — Tombol di samping **Browse**. Membuka folder tujuan yang sedang
+dipilih di file manager sistem kamu.
 
 **Clean title** — Menghapus tag seperti "Official Music Video", "Video Lirik", dll.
 dari nama file secara otomatis. Bisa tambah tag sendiri di kotak teksnya (pisahkan
@@ -260,8 +283,10 @@ possible" menjaga audio asli jika container mendukungnya.
 - Baris yang diawali `#` diabaikan.
 
 **Q: Di mana file hasil unduhan disimpan?**
-- Video: `~/Videos` (atau folder yang kamu pilih manual)
-- Audio: `~/Music` (otomatis saat Audio only diaktifkan)
+- Di folder tujuan yang kamu pilih (default `~/Videos` untuk video, `~/Music`
+  untuk audio pada pemakaian pertama). Folder terakhir otomatis diingat untuk
+  tiap mode, jadi tidak kembali ke default di pemakaian berikutnya.
+- Klik tombol **Open** di sebelah **Browse** untuk langsung membukanya.
 
 **Q: Ikon aplikasi tidak muncul di taskbar Linux.**
 - Restart cache menu Cinnamon:

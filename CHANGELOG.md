@@ -4,28 +4,64 @@ All notable changes to this project are documented here.
 
 ---
 
-## [Unreleased]
+## [0.1.0-beta.4] — 2026-07-16
 
 ### Added
 
-- **Prebuilt x86_64 macOS zip via `macos-15-intel` matrix leg**
-  (`.github/workflows/build-macos.yml`)
-  Every release now ships both Apple Silicon and Intel zips. The
-  x86_64 leg runs on GitHub's `macos-15-intel` runner (4 vCPU /
-  14 GB RAM, supported until August 2027) and finishes in ~2 min
-  in parallel with the ARM64 leg.
+- **Remember last used folders** (`app/window.py`)
+  Output folders are now persisted per mode with `QSettings` under the
+  key group `dirs/` — `download_video`, `download_audio`,
+  `convert_audio`, `convert_video`. The chosen folder is restored on the
+  next launch instead of always falling back to `~/Videos` or `~/Music`.
+  Folders are saved whenever they are changed via Browse, toggled between
+  audio/video, or when a download/convert starts.
+- **Open Folder button** on all three tabs (Downloader, Audio Converter,
+  Video Converter). Opens the currently selected output directory in the
+  system file manager via `QDesktopServices.openUrl`.
+- **File-size estimation** before download. A new `FileSizeWorker`
+  (`app/worker.py`) resolves title, duration, and an estimated output
+  size; the Downloader tab's **Info** button shows it in a small box
+  without starting a download.
+- **Embed metadata and thumbnail** (`app/worker.py` + `app/window.py`)
+  Downloads can now write tags into the output file. The Downloader tab
+  gained **Embed metadata** (on by default) and **Embed thumbnail**
+  (off by default) checkboxes. Thumbnail embedding is limited to
+  containers that support cover art (mp3, m4a, mp4, mkv). Metadata uses
+  yt-dlp's built-in `FFmpegMetadata` postprocessor, which prefers the
+  `track` field over the raw title so music videos get a clean track
+  title.
+- **Compact GUI for smaller screens** (`app/window.py`)
+  Font reduced to 9 pt, tighter margins/spacing, minimum window size
+  lowered to 700×480, and all three tab layouts reorganized into compact
+  grids with horizontal checkbox rows. `QScrollArea` retained as a
+  safety net for very short windows.
 
 ### Changed
+
+- **Version display**: window title now reads
+  `Chrisnov Media Toolkit vX.Y.Z-beta.N`; About dialog and header label
+  already used `APP_VERSION`. `APP_VERSION` remains the single hardcoded
+  source of truth in `app/constants.py`.
+- Short labels expanded to full words: `Res:` → `Resolution:`,
+  `Fmt:` → `Format:`.
+- GitHub Actions build workflows pin `pyinstaller==6.17.0` and default
+  their manual `version` input to `0.1.0-beta.4`.
+
+### Fixed
+
+- **Metadata title corruption** (`app/worker.py`)
+  A `MetadataParser` `INTERPRET` postprocessor overwrote the `title`
+  field with `NA`/empty when `track` was missing, which also produced
+  `NA` filenames. Removed the `MetadataParser`; yt-dlp's native
+  `FFmpegMetadata` already maps `track` → title with a safe fallback, so
+  titles and filenames are never `NA`.
+
+### Maintenance
 
 - Bumped GitHub Actions: `actions/checkout` v4→v5,
   `actions/setup-python` v5→v6, `actions/upload-artifact` v4→v6.
   Resolves the "Node.js 20 is deprecated" annotation GitHub
   surfaced after the September 2025 runner deprecation.
-- Rewrote `docs/OLD-MAC-WORKAROUND.md` so the prebuilt x86_64
-  zip is the recommended path (Option 1); source-run and local
-  build remain as fallbacks. The previous "Why we don't ship
-  prebuilt Intel from CI" section is retired — it cited the now-
-  deprecated `macos-13` runner.
 
 ---
 
