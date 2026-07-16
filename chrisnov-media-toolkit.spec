@@ -65,6 +65,11 @@ a = Analysis(
 
 pyz = PYZ(a.pure, a.zipped_data)
 
+# On Windows, embed file version metadata when version_info.txt exists
+version_file = None
+if sys.platform == 'win32' and Path('version_info.txt').exists():
+    version_file = 'version_info.txt'
+
 exe = EXE(
     pyz,
     a.scripts,
@@ -85,6 +90,7 @@ exe = EXE(
     codesign_identity=None,
     entitlements_file=None,
     icon=app_icon,
+    version=version_file,
 )
 
 if is_macos:

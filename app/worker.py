@@ -24,7 +24,8 @@ class DownloadWorker(QThread):
     def __init__(self, url: str, height: int | None, container: str, bitrate: int,
                  outdir: str, audio_only: bool = False, idx_label: str = "",
                  clean_tags: list[str] | None = None, playlist: bool = False,
-                 archive_path: str | None = None):
+                 archive_path: str | None = None, embed_metadata: bool = False,
+                 embed_thumbnail: bool = False):
         super().__init__()
         self.url = url
         self.height = height
@@ -36,6 +37,8 @@ class DownloadWorker(QThread):
         self.clean_tags = clean_tags
         self.playlist = playlist
         self.archive_path = archive_path
+        self.embed_metadata = embed_metadata
+        self.embed_thumbnail = embed_thumbnail
         self._cancelled = False
 
     def cancel(self) -> None:
@@ -88,6 +91,31 @@ class DownloadWorker(QThread):
             self.progress.emit(100)
             self.status.emit(f"{self.idx_label} Merging/post-processing...")
 
+    def _thumbnail_supported(self) -> bool:
+        """Return True if the target container reliably supports embedded cover art."""
+        if self.audio_only:
+            return self.container in {"mp3", "m4a"}
+        return self.container in {"mp4", "mkv"}
+
+    def _extra_postprocessors(self) -> list[dict]:
+        """Build metadata/thumbnail postprocessors shared by audio and video paths.
+
+        Order matters: FFmpegMetadata must run before EmbedThumbnail so the
+        cover art survives the metadata rewrite.
+        """
+        pps: list[dict] = []
+        if self.embed_metadata:
+            # FFmpegMetadata already prefers YouTube's music fields when present:
+            # it maps %(track)s -> title and %(artist)s -> artist automatically,
+            # falling back to the raw video title only when no music metadata
+            # exists. We deliberately avoid MetadataParser/INTERPRET here because
+            # it overwrites the infodict title with "NA" when %(track)s is empty,
+            # which corrupts both the output filename and the title tag.
+            pps.append({"key": "FFmpegMetadata", "add_metadata": True})
+        if self.embed_thumbnail and self._thumbnail_supported():
+            pps.append({"key": "EmbedThumbnail", "already_have_thumbnail": False})
+        return pps
+
     def _build_opts(self) -> dict:
         opts: dict = {
             "noplaylist": not self.playlist,
@@ -97,6 +125,12 @@ class DownloadWorker(QThread):
         }
         if self.archive_path:
             opts["download_archive"] = self.archive_path
+
+        # Download the thumbnail file so EmbedThumbnail has something to embed.
+        if self.embed_thumbnail and self._thumbnail_supported():
+            opts["writethumbnail"] = True
+
+        extra_pps = self._extra_postprocessors()
 
         if self.audio_only:
             codec = {"mp3": "mp3", "m4a": "aac", "opus": "opus"}.get(self.container, "mp3")
@@ -110,7 +144,7 @@ class DownloadWorker(QThread):
                     "key": "FFmpegExtractAudio",
                     "preferredcodec": codec,
                     "preferredquality": str(self.bitrate),
-                }],
+                }] + extra_pps,
             })
             return opts
         if self.height:
@@ -122,6 +156,8 @@ class DownloadWorker(QThread):
             "merge_output_format": self.container,
             "outtmpl": str(Path(self.outdir) / "%(title)s [%(height)sp].%(ext)s"),
         })
+        if extra_pps:
+            opts["postprocessors"] = extra_pps
         return opts
 
     def _collect_saved_paths(self, info: dict, ydl: YoutubeDL) -> list[str]:
@@ -233,3 +269,70 @@ class PlaylistInspectWorker(QThread):
                 big.append((p_url, n, est_str, (info or {}).get("title", "?")))
         if not self._cancelled:
             self.done.emit(big)
+
+
+class FileSizeWorker(QThread):
+    """Fetch video metadata (title, duration, estimated file size) from a single URL.
+
+    Emits:
+        result(str, float|None, float|None, str, bool, str)
+            — title, length_sec, filesize_mb, format_note, audio_only, resolution
+        error(str)  — error message
+    """
+
+    result = Signal(str, object, object, str, bool, str)  # title, duration, size, note, audio, res
+    error  = Signal(str)
+
+    def __init__(self, url: str, audio_only: bool, height: int | None, fmt: str):
+        super().__init__()
+        self.url = url
+        self.audio_only = audio_only
+        self.height = height
+        self.fmt = fmt
+
+    def run(self) -> None:
+        try:
+            opts: dict = {
+                "quiet": True,
+                "no_warnings": True,
+                "skip_download": True,
+            }
+            if self.audio_only:
+                opts["format"] = "ba/b"
+            elif self.height:
+                opts["format"] = f"bv*[height<={self.height}]+ba/b[height<={self.height}]/b"
+            else:
+                opts["format"] = "bv*+ba/b"
+
+            with YoutubeDL(opts) as ydl:
+                info = ydl.extract_info(self.url, download=False)
+                if isinstance(info, dict) and "entries" in info:
+                    info = info["entries"][0] if info["entries"] else info
+
+            title = (info.get("title") or "?").strip()
+            duration = info.get("duration")
+            filesize = info.get("filesize") or info.get("filesize_approx")
+            fmt_note = info.get("format_note", "")
+
+            # Determine resolution label
+            if self.audio_only:
+                resolution = "audio only"
+            elif self.height:
+                resolution = f"up to {self.height}p"
+            else:
+                resolution = "best available"
+
+            filesize_mb = None
+            if filesize:
+                filesize_mb = round(filesize / (1024 * 1024), 1)
+
+            if filesize_mb is None and duration:
+                # Rough estimate based on format
+                kbps = 128 if self.audio_only else 2500
+                filesize_mb = round(duration * kbps * 1000 / 8 / (1024 * 1024), 1)
+
+            self.result.emit(title, duration, filesize_mb, fmt_note or self.fmt,
+                             self.audio_only, resolution)
+
+        except Exception as exc:
+            self.error.emit(str(exc))

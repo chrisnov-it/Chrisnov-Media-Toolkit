@@ -107,9 +107,32 @@ Chrisnov Media Toolkit.
 - Added `timeout-minutes: 30` to all three GitHub Actions build jobs.
 - Added `BUILD_TYPE: LITE` to Windows workflow job env for consistency.
 
+## 11. Beta.3 → Beta.4 Usability and Packaging Improvements
+
+- Added `APP_VERSION` constant (single source of truth in `app/constants.py`)
+  shown in the window title, an About dialog, and a header label.
+- Bumped GitHub Actions: `actions/checkout` v4→v5, `actions/setup-python`
+  v5→v6, `actions/upload-artifact` v4→v6.
+- Embedded `VSVersionInfo` (VERSIONINFO) into the Windows `.exe` via a generated
+  `version_info.txt` to reduce SmartScreen false positives.
+- Compacted the GUI for 13"+ laptops: 9 pt font, tighter spacing, min window
+  700×480, compact grids with horizontal checkbox rows.
+- Added **file-size estimation** (`FileSizeWorker` + Downloader **Info** button)
+  showing title, duration, and estimated output size before downloading.
+- Added **embed metadata** and **embed thumbnail** options to the Downloader tab.
+- Fixed metadata title corruption that produced `NA` filenames by removing a
+  faulty `MetadataParser` and relying on yt-dlp's native `FFmpegMetadata`.
+- Added **remember last folder** (QSettings per mode) and an **Open Folder**
+  button on all three tabs.
+- Expanded short labels to full words: `Res:` → `Resolution:`, `Fmt:` → `Format:`.
+- Added the initial 46-test automated suite under `tests/` (runs on every push
+  and PR via `.github/workflows/tests.yml`).
+
+## Still Pending (carried over)
+
 - Test playlist cleanup and cancel cleanup on real large playlists.
-- Rebuild and publish fresh Lite/Bundled binaries after the latest cleanup fixes.
-- Add a visible version label and About dialog.
-- Add lightweight tests for title cleanup and collision handling.
+- Rebuild and publish fresh Lite/Bundled binaries after the latest fixes.
+- Validate the prebuilt x86_64 macOS zip on a real Intel Mac before declaring
+  Intel support production-ready.
 - Decide whether to keep `test_opus.opus` as a manual fixture or move it into a
   documented `scratch/` or `tests/fixtures/` location.

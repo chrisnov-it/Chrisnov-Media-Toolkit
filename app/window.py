@@ -7,8 +7,8 @@ import sys
 import time
 from pathlib import Path
 
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QDragEnterEvent, QDropEvent
+from PySide6.QtCore import Qt, QSettings, QUrl
+from PySide6.QtGui import QDragEnterEvent, QDropEvent, QDesktopServices
 from PySide6.QtWidgets import (
     QApplication, QDialog, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
     QPushButton, QComboBox, QFileDialog, QMessageBox, QProgressBar, QCheckBox,
@@ -25,7 +25,7 @@ from .constants import (
 from .cleaner import (
     DEFAULT_CLEAN_TAGS, parse_tag_list, rename_with_cleanup, discover_new_files,
 )
-from .worker import DownloadWorker, PlaylistInspectWorker, audio_extensions, video_extensions
+from .worker import DownloadWorker, PlaylistInspectWorker, FileSizeWorker, audio_extensions, video_extensions
 from .converter_worker import (
     ConvertWorker, SUPPORTED_INPUT_EXTENSIONS, OUTPUT_FORMATS,
     AUDIO_BITRATES as CONV_BITRATES, SAMPLE_RATES, DEFAULT_LUFS,
@@ -37,17 +37,42 @@ from .converter_worker import (
 class MainWindow(QWidget):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Chrisnov Media Toolkit")
-        self.setMinimumSize(760, 560)
-        self.resize(860, 660)
+        self.setWindowTitle(f"Chrisnov Media Toolkit v{APP_VERSION}")
+        self.setMinimumSize(700, 480)
+        self.resize(900, 620)
         self.setAcceptDrops(True)
+        self._settings = QSettings("Chrisnov IT Solutions", "Chrisnov Media Toolkit")
         self.current_batch: list[str] = []
         self._conv_files: list[Path] = []   # files queued for conversion
         self._conv_worker: ConvertWorker | None = None
         self._video_conv_files: list[Path] = []
         self._video_conv_worker: VideoConvertWorker | None = None
         self._inspect_worker: PlaylistInspectWorker | None = None
+        self._info_worker: FileSizeWorker | None = None
         self._build_ui()
+
+    # ------------------------------------------------------------------ #
+    #  Persistent folder settings (QSettings)                             #
+    # ------------------------------------------------------------------ #
+
+    def _saved_dir(self, key: str, default: Path) -> str:
+        """Return the saved folder for *key*, falling back to *default* if the
+        saved value is missing or no longer exists on disk."""
+        value = self._settings.value(f"dirs/{key}", "", type=str)
+        if value and Path(value).is_dir():
+            return value
+        return str(default)
+
+    def _save_dir(self, key: str, path: str) -> None:
+        """Persist a folder path for *key* if it points at a real directory."""
+        if path and Path(path).is_dir():
+            self._settings.setValue(f"dirs/{key}", path)
+
+    @staticmethod
+    def _open_in_explorer(path: str) -> None:
+        """Open *path* in the system file manager."""
+        if path and Path(path).is_dir():
+            QDesktopServices.openUrl(QUrl.fromLocalFile(path))
 
     # ------------------------------------------------------------------ #
     #  Drag-and-drop — route to active tab                                #
@@ -123,8 +148,8 @@ class MainWindow(QWidget):
     def _build_ui(self) -> None:
         self._apply_style()
         root = QVBoxLayout(self)
-        root.setContentsMargins(14, 14, 14, 14)
-        root.setSpacing(10)
+        root.setContentsMargins(10, 8, 10, 8)
+        root.setSpacing(6)
 
         # Header: app name + version label + About button
         header = QHBoxLayout()
@@ -135,19 +160,19 @@ class MainWindow(QWidget):
         ver_label.setObjectName("versionLabel")
         about_btn = QPushButton("About")
         about_btn.setObjectName("aboutButton")
-        about_btn.setFixedWidth(64)
+        about_btn.setFixedWidth(56)
         about_btn.clicked.connect(self._show_about)
         header.addWidget(app_label)
-        header.addSpacing(6)
+        header.addSpacing(4)
         header.addWidget(ver_label)
         header.addStretch()
         header.addWidget(about_btn)
         root.addLayout(header)
 
         self._tabs = QTabWidget()
-        self._tabs.addTab(self._wrap_tab(self._build_downloader_tab()), "⬇  Downloader")
-        self._tabs.addTab(self._wrap_tab(self._build_converter_tab()), "♫  Audio Converter")
-        self._tabs.addTab(self._wrap_tab(self._build_video_converter_tab()), "▣  Video Converter")
+        self._tabs.addTab(self._wrap_tab(self._build_downloader_tab()), "\u2b07  Downloader")
+        self._tabs.addTab(self._wrap_tab(self._build_converter_tab()), "\u266b  Audio Converter")
+        self._tabs.addTab(self._wrap_tab(self._build_video_converter_tab()), "\u25a3  Video Converter")
         root.addWidget(self._tabs)
 
     def _wrap_tab(self, widget: QWidget) -> QScrollArea:
@@ -162,20 +187,21 @@ class MainWindow(QWidget):
         self.setStyleSheet("""
             QWidget {
                 font-family: "Segoe UI", "Noto Sans", Arial, sans-serif;
-                font-size: 10pt;
+                font-size: 9pt;
             }
             QTabWidget::pane {
                 border: 1px solid #d7dce2;
-                border-radius: 8px;
+                border-radius: 6px;
                 background: #fbfcfd;
             }
             QTabBar::tab {
-                padding: 7px 12px;
-                margin-right: 4px;
-                border-top-left-radius: 7px;
-                border-top-right-radius: 7px;
+                padding: 4px 10px;
+                margin-right: 2px;
+                border-top-left-radius: 5px;
+                border-top-right-radius: 5px;
                 background: #eef2f6;
                 color: #26313d;
+                font-size: 9pt;
             }
             QTabBar::tab:selected {
                 background: #ffffff;
@@ -184,29 +210,31 @@ class MainWindow(QWidget):
             }
             QGroupBox {
                 border: 1px solid #d7dce2;
-                border-radius: 8px;
-                margin-top: 10px;
-                padding: 12px 10px 10px 10px;
+                border-radius: 6px;
+                margin-top: 8px;
+                padding: 8px 8px 6px 8px;
                 font-weight: 600;
             }
             QGroupBox::title {
                 subcontrol-origin: margin;
-                left: 10px;
-                padding: 0 4px;
+                left: 8px;
+                padding: 0 3px;
             }
             QLineEdit, QComboBox, QListWidget, QDoubleSpinBox, QSpinBox {
-                min-height: 28px;
+                min-height: 26px;
                 border: 1px solid #cbd3dc;
-                border-radius: 6px;
-                padding: 4px 8px;
+                border-radius: 5px;
+                padding: 2px 6px;
                 background: #ffffff;
+                font-size: 9pt;
             }
             QPushButton {
-                min-height: 29px;
-                padding: 4px 9px;
+                min-height: 27px;
+                padding: 3px 10px;
                 border: 1px solid #b8c2cc;
-                border-radius: 6px;
+                border-radius: 5px;
                 background: #f5f7fa;
+                font-size: 9pt;
             }
             QPushButton:hover {
                 background: #edf2f7;
@@ -235,15 +263,19 @@ class MainWindow(QWidget):
             QPushButton#dangerButton:hover {
                 background: #ffe8e8;
             }
+            QCheckBox, QRadioButton {
+                font-size: 9pt;
+            }
             QProgressBar {
-                min-height: 16px;
+                min-height: 14px;
+                max-height: 16px;
                 border: 1px solid #cbd3dc;
-                border-radius: 8px;
+                border-radius: 6px;
                 text-align: center;
                 background: #eef2f6;
             }
             QProgressBar::chunk {
-                border-radius: 8px;
+                border-radius: 6px;
                 background: #2f80ed;
             }
             QLabel#appNameLabel {
@@ -252,15 +284,17 @@ class MainWindow(QWidget):
                 color: #1a2533;
             }
             QLabel#versionLabel {
-                font-size: 9pt;
+                font-size: 8pt;
                 color: #8a94a0;
                 padding-top: 2px;
             }
             QPushButton#aboutButton {
-                font-size: 9pt;
+                font-size: 8pt;
                 color: #4a5568;
                 border-color: #d7dce2;
                 background: transparent;
+                min-height: 24px;
+                padding: 2px 8px;
             }
             QPushButton#aboutButton:hover {
                 background: #edf2f7;
@@ -371,27 +405,29 @@ class MainWindow(QWidget):
     def _build_downloader_tab(self) -> QWidget:
         w = QWidget()
         root = QVBoxLayout(w)
-        root.setContentsMargins(14, 14, 14, 14)
-        root.setSpacing(10)
+        root.setContentsMargins(10, 8, 10, 8)
+        root.setSpacing(5)
 
-        # URL input
-        root.addWidget(QLabel("Video URL (or drag a URL/text file here):"))
+        # URL input row: label, input, Add button, Info button — all one row
+        url_grid = QHBoxLayout()
+        url_grid.addWidget(QLabel("URL:"))
         self.url_input = QLineEdit()
         self.url_input.setPlaceholderText("https://www.youtube.com/watch?v=...")
         self.url_input.returnPressed.connect(self._add_url_from_input)
-        root.addWidget(self.url_input)
-
-        add_row = QHBoxLayout()
+        url_grid.addWidget(self.url_input, 1)
         self.add_queue_btn = QPushButton("Add")
         self.add_queue_btn.clicked.connect(self._add_url_from_input)
-        add_row.addWidget(self.add_queue_btn)
-        add_row.addStretch()
-        root.addLayout(add_row)
+        url_grid.addWidget(self.add_queue_btn)
+        self.info_btn = QPushButton("Info")
+        self.info_btn.setToolTip("Fetch video details: title, size, length before downloading")
+        self.info_btn.clicked.connect(self._fetch_video_info)
+        url_grid.addWidget(self.info_btn)
+        root.addLayout(url_grid)
 
-        # Queue list
-        root.addWidget(QLabel("Download queue:"))
+        # Queue + controls
+        root.addWidget(QLabel("Queue:"))
         self.queue_list = QListWidget()
-        self.queue_list.setMinimumHeight(130)
+        self.queue_list.setMinimumHeight(90)
         self.queue_list.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         root.addWidget(self.queue_list, 1)
 
@@ -405,67 +441,101 @@ class MainWindow(QWidget):
         qrow.addStretch()
         root.addLayout(qrow)
 
-        # Checkboxes
-        self.audio_only_chk = QCheckBox("Audio only (extract soundtrack)")
+        # Checkboxes compact rows
+        chk_row = QHBoxLayout()
+        self.audio_only_chk = QCheckBox("Audio only")
         self.audio_only_chk.toggled.connect(self._on_audio_toggled)
-        root.addWidget(self.audio_only_chk)
-
-        self.skip_dup_chk = QCheckBox("Skip already-downloaded (download archive)")
+        chk_row.addWidget(self.audio_only_chk)
+        self.skip_dup_chk = QCheckBox("Skip duplicates")
         self.skip_dup_chk.setChecked(True)
-        root.addWidget(self.skip_dup_chk)
-
-        self.clean_chk = QCheckBox("Clean title (strip: Official Music Video, etc.)")
+        chk_row.addWidget(self.skip_dup_chk)
+        self.clean_chk = QCheckBox("Clean title")
         self.clean_chk.setChecked(True)
         self.clean_chk.toggled.connect(self._on_clean_toggled)
-        root.addWidget(self.clean_chk)
+        chk_row.addWidget(self.clean_chk)
+        chk_row.addStretch()
+        root.addLayout(chk_row)
 
+        chk_row2 = QHBoxLayout()
+        self.embed_meta_chk = QCheckBox("Embed metadata")
+        self.embed_meta_chk.setToolTip("Write title, artist, and other tags into the file")
+        self.embed_meta_chk.setChecked(True)
+        chk_row2.addWidget(self.embed_meta_chk)
+        self.embed_thumb_chk = QCheckBox("Embed thumbnail")
+        self.embed_thumb_chk.setToolTip(
+            "Embed cover art. Works with mp3/m4a (audio) and mp4/mkv (video)."
+        )
+        chk_row2.addWidget(self.embed_thumb_chk)
+        chk_row2.addStretch()
+        root.addLayout(chk_row2)
+
+        # Clean tags input (shown only when clean_chk is on)
         self.clean_tags_input = QLineEdit(", ".join(DEFAULT_CLEAN_TAGS))
         self.clean_tags_input.setClearButtonEnabled(True)
         root.addWidget(self.clean_tags_input)
 
-        # Resolution / container / bitrate controls
-        row1 = QGridLayout()
-        row1.setHorizontalSpacing(8)
-        row1.setVerticalSpacing(8)
+        # Resolution / container / bitrate — compact grid row
+        ctrl = QGridLayout()
+        ctrl.setHorizontalSpacing(6)
+        ctrl.setVerticalSpacing(4)
         self.res_label = QLabel("Resolution:")
-        row1.addWidget(self.res_label, 0, 0)
+        ctrl.addWidget(self.res_label, 0, 0)
         self.res_combo = QComboBox()
         for label, _ in RES_PRESETS:
             self.res_combo.addItem(label)
         self.res_combo.setCurrentIndex(2)
-        row1.addWidget(self.res_combo, 0, 1)
+        ctrl.addWidget(self.res_combo, 0, 1)
 
-        self.container_label = QLabel("Container:")
-        row1.addWidget(self.container_label, 0, 2)
+        self.container_label = QLabel("Format:")
+        ctrl.addWidget(self.container_label, 0, 2)
         self.container_combo = QComboBox()
         self.container_combo.addItems(VIDEO_CONTAINERS)
         self.container_combo.setCurrentText("mp4")
-        row1.addWidget(self.container_combo, 0, 3)
+        ctrl.addWidget(self.container_combo, 0, 3)
 
-        self.bitrate_label = QLabel("Bitrate (kbps):")
-        row1.addWidget(self.bitrate_label, 1, 0)
+        self.bitrate_label = QLabel("kbps:")
+        ctrl.addWidget(self.bitrate_label, 0, 4)
         self.bitrate_combo = QComboBox()
         self.bitrate_combo.addItems(AUDIO_BITRATES)
         self.bitrate_combo.setCurrentText("192")
         self.bitrate_combo.setEnabled(False)
         self.bitrate_label.setEnabled(False)
-        row1.addWidget(self.bitrate_combo, 1, 1)
-        row1.setColumnStretch(1, 1)
-        row1.setColumnStretch(3, 1)
-        root.addLayout(row1)
+        ctrl.addWidget(self.bitrate_combo, 0, 5)
+        ctrl.setColumnStretch(1, 1)
+        ctrl.setColumnStretch(3, 1)
+        ctrl.setColumnStretch(5, 1)
+        root.addLayout(ctrl)
 
-        # Output folder
-        row2 = QHBoxLayout()
-        row2.addWidget(QLabel("Output folder:"))
-        self.dir_input = QLineEdit(str(Path.home() / "Videos"))
-        row2.addWidget(self.dir_input, 1)
-        self.browse_btn = QPushButton("Browse...")
+        # Output folder row
+        out_row = QHBoxLayout()
+        out_row.addWidget(QLabel("Output:"))
+        self.dir_input = QLineEdit(
+            self._saved_dir("download_video", Path.home() / "Videos")
+        )
+        out_row.addWidget(self.dir_input, 1)
+        self.browse_btn = QPushButton("Browse")
         self.browse_btn.clicked.connect(self._browse_dl)
-        row2.addWidget(self.browse_btn)
-        root.addLayout(row2)
+        out_row.addWidget(self.browse_btn)
+        self.open_dir_btn = QPushButton("Open")
+        self.open_dir_btn.setToolTip("Open the output folder in your file manager")
+        self.open_dir_btn.clicked.connect(
+            lambda: self._open_in_explorer(self.dir_input.text().strip())
+        )
+        out_row.addWidget(self.open_dir_btn)
+        root.addLayout(out_row)
 
-        # Start / Cancel
-        row3 = QHBoxLayout()
+        # Info box (hidden by default, shown after Info button click)
+        self.info_box = QLabel("")
+        self.info_box.setWordWrap(True)
+        self.info_box.setStyleSheet(
+            "background: #f0f5ff; border: 1px solid #b3d4ff; "
+            "border-radius: 4px; padding: 4px 8px; font-size: 9pt; color: #1a2533;"
+        )
+        self.info_box.hide()
+        root.addWidget(self.info_box)
+
+        # Start / Cancel + Progress + Status
+        btn_row = QHBoxLayout()
         self.download_btn = QPushButton("Start")
         self.download_btn.setObjectName("primaryButton")
         self.download_btn.clicked.connect(self._start_download)
@@ -473,11 +543,10 @@ class MainWindow(QWidget):
         self.cancel_btn.setObjectName("dangerButton")
         self.cancel_btn.clicked.connect(self._cancel_download)
         self.cancel_btn.setEnabled(False)
-        row3.addWidget(self.download_btn)
-        row3.addWidget(self.cancel_btn)
-        root.addLayout(row3)
+        btn_row.addWidget(self.download_btn)
+        btn_row.addWidget(self.cancel_btn)
+        root.addLayout(btn_row)
 
-        # Progress + status
         self.dl_progress = QProgressBar()
         self.dl_progress.setRange(0, 100)
         root.addWidget(self.dl_progress)
@@ -493,21 +562,21 @@ class MainWindow(QWidget):
     def _build_converter_tab(self) -> QWidget:
         w = QWidget()
         root = QVBoxLayout(w)
-        root.setContentsMargins(14, 14, 14, 14)
-        root.setSpacing(10)
+        root.setContentsMargins(10, 8, 10, 8)
+        root.setSpacing(5)
 
-        # File queue
-        root.addWidget(QLabel("Files to convert (drag-and-drop or Browse):"))
+        # File list
+        root.addWidget(QLabel("Files:"))
         self.conv_file_list = QListWidget()
-        self.conv_file_list.setMinimumHeight(150)
+        self.conv_file_list.setMinimumHeight(90)
         self.conv_file_list.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.conv_file_list.setSelectionMode(QAbstractItemView.ExtendedSelection)
         root.addWidget(self.conv_file_list, 1)
 
         fbtn_row = QHBoxLayout()
-        add_files_btn = QPushButton("Files...")
+        add_files_btn = QPushButton("Files")
         add_files_btn.clicked.connect(self._conv_browse_files)
-        add_folder_btn = QPushButton("Folder...")
+        add_folder_btn = QPushButton("Folder")
         add_folder_btn.clicked.connect(self._conv_browse_folder)
         self.conv_remove_btn = QPushButton("Remove")
         self.conv_remove_btn.clicked.connect(self._conv_remove_selected)
@@ -520,83 +589,90 @@ class MainWindow(QWidget):
         fbtn_row.addStretch()
         root.addLayout(fbtn_row)
 
-        # Format / bitrate / CBR-VBR row
-        fmt_row = QHBoxLayout()
-        fmt_row.addWidget(QLabel("Output format:"))
+        # Format + codec controls — compact grid
+        fmt_grid = QGridLayout()
+        fmt_grid.setHorizontalSpacing(6)
+        fmt_grid.setVerticalSpacing(4)
+        fmt_grid.addWidget(QLabel("Format:"), 0, 0)
         self.conv_fmt_combo = QComboBox()
         self.conv_fmt_combo.addItems(OUTPUT_FORMATS)
         self.conv_fmt_combo.setCurrentText("m4a")
         self.conv_fmt_combo.currentTextChanged.connect(self._on_conv_fmt_changed)
-        fmt_row.addWidget(self.conv_fmt_combo, 1)
+        fmt_grid.addWidget(self.conv_fmt_combo, 0, 1)
 
+        self.conv_bitrate_label = QLabel("kbps:")
+        fmt_grid.addWidget(self.conv_bitrate_label, 0, 2)
+        self.conv_bitrate_combo = QComboBox()
+        self.conv_bitrate_combo.addItems(CONV_BITRATES)
+        self.conv_bitrate_combo.setCurrentText("128")
+        fmt_grid.addWidget(self.conv_bitrate_combo, 0, 3)
+
+        sr_label = QLabel("SR:")
+        fmt_grid.addWidget(sr_label, 0, 4)
+        self.conv_sr_combo = QComboBox()
+        for label, _ in SAMPLE_RATES:
+            self.conv_sr_combo.addItem(label)
+        self.conv_sr_combo.setCurrentIndex(0)
+        fmt_grid.addWidget(self.conv_sr_combo, 0, 5)
+
+        # CBR/VBR row
         self.conv_mode_label = QLabel("Mode:")
-        fmt_row.addWidget(self.conv_mode_label)
+        fmt_grid.addWidget(self.conv_mode_label, 1, 0)
         self.conv_cbr_radio = QRadioButton("CBR")
         self.conv_vbr_radio = QRadioButton("VBR")
         self.conv_cbr_radio.setChecked(True)
         self.conv_bitrate_group = QButtonGroup(w)
         self.conv_bitrate_group.addButton(self.conv_cbr_radio)
         self.conv_bitrate_group.addButton(self.conv_vbr_radio)
-        fmt_row.addWidget(self.conv_cbr_radio)
-        fmt_row.addWidget(self.conv_vbr_radio)
+        mode_row = QHBoxLayout()
+        mode_row.addWidget(self.conv_cbr_radio)
+        mode_row.addWidget(self.conv_vbr_radio)
+        mode_row.addStretch()
+        fmt_grid.addLayout(mode_row, 1, 1, 1, 5)
 
-        self.conv_bitrate_label = QLabel("Bitrate (kbps):")
-        fmt_row.addWidget(self.conv_bitrate_label)
-        self.conv_bitrate_combo = QComboBox()
-        self.conv_bitrate_combo.addItems(CONV_BITRATES)
-        self.conv_bitrate_combo.setCurrentText("128")
-        fmt_row.addWidget(self.conv_bitrate_combo, 1)
-        root.addLayout(fmt_row)
+        fmt_grid.setColumnStretch(1, 1)
+        fmt_grid.setColumnStretch(3, 1)
+        fmt_grid.setColumnStretch(5, 1)
+        root.addLayout(fmt_grid)
 
-        # Sample rate row
-        sr_row = QHBoxLayout()
-        sr_row.addWidget(QLabel("Sample rate:"))
-        self.conv_sr_combo = QComboBox()
-        for label, _ in SAMPLE_RATES:
-            self.conv_sr_combo.addItem(label)
-        self.conv_sr_combo.setCurrentIndex(0)
-        sr_row.addWidget(self.conv_sr_combo, 1)
-        sr_row.addStretch()
-        root.addLayout(sr_row)
-
-        # Normalization group
+        # Normalization — condensed as a row of radio buttons + spinboxes
         norm_box = QGroupBox("Normalization")
-        norm_layout = QVBoxLayout(norm_box)
+        norm_layout = QGridLayout(norm_box)
+        norm_layout.setContentsMargins(6, 12, 6, 4)
+        norm_layout.setHorizontalSpacing(12)
+        norm_layout.setVerticalSpacing(2)
 
         self.conv_norm_none   = QRadioButton("None")
-        self.conv_norm_ebu    = QRadioButton("EBU R128 loudnorm (broadcast standard)")
-        self.conv_norm_peak   = QRadioButton("Peak normalize")
+        self.conv_norm_ebu    = QRadioButton("EBU R128")
+        self.conv_norm_peak   = QRadioButton("Peak")
         self.conv_norm_none.setChecked(True)
         norm_group = QButtonGroup(w)
-        for rb in (self.conv_norm_none, self.conv_norm_ebu, self.conv_norm_peak):
-            norm_group.addButton(rb)
-            norm_layout.addWidget(rb)
+        norm_group.addButton(self.conv_norm_none)
+        norm_group.addButton(self.conv_norm_ebu)
+        norm_group.addButton(self.conv_norm_peak)
+        norm_layout.addWidget(self.conv_norm_none, 0, 0)
+        norm_layout.addWidget(self.conv_norm_ebu, 0, 1)
+        norm_layout.addWidget(self.conv_norm_peak, 0, 2)
 
-        lufs_row = QHBoxLayout()
-        self.conv_lufs_label = QLabel("  Target LUFS:")
+        self.conv_lufs_label = QLabel("LUFS:")
         self.conv_lufs_spin  = QDoubleSpinBox()
         self.conv_lufs_spin.setRange(-30.0, -5.0)
         self.conv_lufs_spin.setSingleStep(0.5)
         self.conv_lufs_spin.setValue(DEFAULT_LUFS)
         self.conv_lufs_spin.setSuffix(" LUFS")
-        lufs_row.addWidget(self.conv_lufs_label)
-        lufs_row.addWidget(self.conv_lufs_spin)
-        lufs_row.addStretch()
-        norm_layout.addLayout(lufs_row)
+        norm_layout.addWidget(self.conv_lufs_label, 0, 3)
+        norm_layout.addWidget(self.conv_lufs_spin, 0, 4)
 
-        peak_row = QHBoxLayout()
-        self.conv_peak_label = QLabel("  Target peak:")
+        self.conv_peak_label = QLabel("Peak:")
         self.conv_peak_spin  = QDoubleSpinBox()
         self.conv_peak_spin.setRange(-12.0, 0.0)
         self.conv_peak_spin.setSingleStep(0.5)
         self.conv_peak_spin.setValue(-1.0)
         self.conv_peak_spin.setSuffix(" dBTP")
-        peak_row.addWidget(self.conv_peak_label)
-        peak_row.addWidget(self.conv_peak_spin)
-        peak_row.addStretch()
-        norm_layout.addLayout(peak_row)
+        norm_layout.addWidget(self.conv_peak_label, 0, 5)
+        norm_layout.addWidget(self.conv_peak_spin, 0, 6)
+        norm_layout.setColumnStretch(7, 1)
 
-        # Show/hide LUFS / peak spinboxes based on selection
         def _update_norm_ui() -> None:
             ebu  = self.conv_norm_ebu.isChecked()
             peak = self.conv_norm_peak.isChecked()
@@ -612,25 +688,35 @@ class MainWindow(QWidget):
 
         root.addWidget(norm_box)
 
-        # Extra options
-        self.conv_trim_chk = QCheckBox("Trim silence (remove leading/trailing silence)")
-        root.addWidget(self.conv_trim_chk)
-
-        self.conv_clean_chk = QCheckBox("Clean title (use same tags as Downloader tab)")
+        # Extra checkboxes
+        chk_row = QHBoxLayout()
+        self.conv_trim_chk = QCheckBox("Trim silence")
+        self.conv_clean_chk = QCheckBox("Clean title")
         self.conv_clean_chk.setChecked(True)
-        root.addWidget(self.conv_clean_chk)
+        chk_row.addWidget(self.conv_trim_chk)
+        chk_row.addWidget(self.conv_clean_chk)
+        chk_row.addStretch()
+        root.addLayout(chk_row)
 
         # Output folder
         out_row = QHBoxLayout()
-        out_row.addWidget(QLabel("Output folder:"))
-        self.conv_dir_input = QLineEdit(str(Path.home() / "Music"))
+        out_row.addWidget(QLabel("Output:"))
+        self.conv_dir_input = QLineEdit(
+            self._saved_dir("convert_audio", Path.home() / "Music")
+        )
         out_row.addWidget(self.conv_dir_input, 1)
-        conv_browse_btn = QPushButton("Browse...")
+        conv_browse_btn = QPushButton("Browse")
         conv_browse_btn.clicked.connect(self._conv_browse_dir)
         out_row.addWidget(conv_browse_btn)
+        conv_open_btn = QPushButton("Open")
+        conv_open_btn.setToolTip("Open the output folder in your file manager")
+        conv_open_btn.clicked.connect(
+            lambda: self._open_in_explorer(self.conv_dir_input.text().strip())
+        )
+        out_row.addWidget(conv_open_btn)
         root.addLayout(out_row)
 
-        # Convert / Cancel
+        # Convert / Cancel + Progress + Status
         btn_row = QHBoxLayout()
         self.conv_start_btn = QPushButton("Convert")
         self.conv_start_btn.setObjectName("primaryButton")
@@ -643,16 +729,13 @@ class MainWindow(QWidget):
         btn_row.addWidget(self.conv_cancel_btn)
         root.addLayout(btn_row)
 
-        # Progress + status
         self.conv_progress = QProgressBar()
         self.conv_progress.setRange(0, 100)
         root.addWidget(self.conv_progress)
         self.conv_status_label = QLabel("Ready.")
         root.addWidget(self.conv_status_label)
 
-        # Trigger format-change to set correct initial state
         self._on_conv_fmt_changed(self.conv_fmt_combo.currentText())
-
         return w
 
     # ------------------------------------------------------------------ #
@@ -662,20 +745,20 @@ class MainWindow(QWidget):
     def _build_video_converter_tab(self) -> QWidget:
         w = QWidget()
         root = QVBoxLayout(w)
-        root.setContentsMargins(14, 14, 14, 14)
-        root.setSpacing(10)
+        root.setContentsMargins(10, 8, 10, 8)
+        root.setSpacing(5)
 
-        root.addWidget(QLabel("Videos to convert (drag-and-drop, Add files, or Add folder):"))
+        root.addWidget(QLabel("Videos:"))
         self.video_conv_file_list = QListWidget()
-        self.video_conv_file_list.setMinimumHeight(170)
+        self.video_conv_file_list.setMinimumHeight(90)
         self.video_conv_file_list.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.video_conv_file_list.setSelectionMode(QAbstractItemView.ExtendedSelection)
         root.addWidget(self.video_conv_file_list, 1)
 
         fbtn_row = QHBoxLayout()
-        add_files_btn = QPushButton("Files...")
+        add_files_btn = QPushButton("Files")
         add_files_btn.clicked.connect(self._video_conv_browse_files)
-        add_folder_btn = QPushButton("Folder...")
+        add_folder_btn = QPushButton("Folder")
         add_folder_btn.clicked.connect(self._video_conv_browse_folder)
         self.video_conv_remove_btn = QPushButton("Remove")
         self.video_conv_remove_btn.clicked.connect(self._video_conv_remove_selected)
@@ -688,38 +771,56 @@ class MainWindow(QWidget):
         fbtn_row.addStretch()
         root.addLayout(fbtn_row)
 
-        fmt_row = QHBoxLayout()
-        fmt_row.addWidget(QLabel("Output format:"))
+        # Format + quality — compact grid
+        ctrl = QGridLayout()
+        ctrl.setHorizontalSpacing(6)
+        ctrl.setVerticalSpacing(4)
+        ctrl.addWidget(QLabel("Format:"), 0, 0)
         self.video_conv_fmt_combo = QComboBox()
         self.video_conv_fmt_combo.addItems(VIDEO_OUTPUT_FORMATS)
         self.video_conv_fmt_combo.setCurrentText("mp4")
-        fmt_row.addWidget(self.video_conv_fmt_combo, 1)
+        ctrl.addWidget(self.video_conv_fmt_combo, 0, 1)
 
-        fmt_row.addWidget(QLabel("Quality:"))
+        ctrl.addWidget(QLabel("Quality:"), 0, 2)
         self.video_conv_quality_combo = QComboBox()
         for label, value in VIDEO_QUALITY_PRESETS:
             self.video_conv_quality_combo.addItem(label, value)
         self.video_conv_quality_combo.setCurrentIndex(1)
-        fmt_row.addWidget(self.video_conv_quality_combo, 1)
-        root.addLayout(fmt_row)
+        ctrl.addWidget(self.video_conv_quality_combo, 0, 3)
+        ctrl.setColumnStretch(1, 1)
+        ctrl.setColumnStretch(3, 1)
+        root.addLayout(ctrl)
 
-        self.video_conv_audio_copy_chk = QCheckBox("Keep original audio when possible")
+        # Checkboxes
+        chk_row = QHBoxLayout()
+        self.video_conv_audio_copy_chk = QCheckBox("Copy audio")
         self.video_conv_audio_copy_chk.setChecked(True)
-        root.addWidget(self.video_conv_audio_copy_chk)
-
-        self.video_conv_clean_chk = QCheckBox("Clean title (use same tags as Downloader tab)")
+        self.video_conv_clean_chk = QCheckBox("Clean title")
         self.video_conv_clean_chk.setChecked(True)
-        root.addWidget(self.video_conv_clean_chk)
+        chk_row.addWidget(self.video_conv_audio_copy_chk)
+        chk_row.addWidget(self.video_conv_clean_chk)
+        chk_row.addStretch()
+        root.addLayout(chk_row)
 
+        # Output folder
         out_row = QHBoxLayout()
-        out_row.addWidget(QLabel("Output folder:"))
-        self.video_conv_dir_input = QLineEdit(str(Path.home() / "Videos"))
+        out_row.addWidget(QLabel("Output:"))
+        self.video_conv_dir_input = QLineEdit(
+            self._saved_dir("convert_video", Path.home() / "Videos")
+        )
         out_row.addWidget(self.video_conv_dir_input, 1)
-        browse_btn = QPushButton("Browse...")
+        browse_btn = QPushButton("Browse")
         browse_btn.clicked.connect(self._video_conv_browse_dir)
         out_row.addWidget(browse_btn)
+        video_open_btn = QPushButton("Open")
+        video_open_btn.setToolTip("Open the output folder in your file manager")
+        video_open_btn.clicked.connect(
+            lambda: self._open_in_explorer(self.video_conv_dir_input.text().strip())
+        )
+        out_row.addWidget(video_open_btn)
         root.addLayout(out_row)
 
+        # Convert / Cancel + Progress + Status
         btn_row = QHBoxLayout()
         self.video_conv_start_btn = QPushButton("Convert")
         self.video_conv_start_btn.setObjectName("primaryButton")
@@ -743,6 +844,73 @@ class MainWindow(QWidget):
     # ------------------------------------------------------------------ #
     #  Downloader — URL helpers                                            #
     # ------------------------------------------------------------------ #
+
+    def _fetch_video_info(self) -> None:
+        """Fetch metadata (title, size, length) for a single URL."""
+        url = self.url_input.text().strip()
+        if not url:
+            QMessageBox.warning(self, "No URL", "Enter a URL first.")
+            return
+        if not url.startswith(("http://", "https://")):
+            QMessageBox.warning(self, "Bad URL", "URL must start with http:// or https://")
+            return
+
+        self.info_btn.setEnabled(False)
+        self.info_btn.setText("...")
+        self.status_label.setText("Fetching info...")
+
+        audio = self.audio_only_chk.isChecked()
+        height = RES_PRESETS[self.res_combo.currentIndex()][1]
+        fmt = self.container_combo.currentText()
+
+        self._info_worker = FileSizeWorker(url, audio, height, fmt)
+        self._info_worker.result.connect(self._on_info_result)
+        self._info_worker.error.connect(self._on_info_error)
+        self._info_worker.start()
+
+    def _on_info_result(self, title: str, length_sec: float | None,
+                         filesize_mb: float | None, fmt_note: str,
+                         audio: bool, resolution: str) -> None:
+        """Display fetched metadata in the info box."""
+        self._info_worker = None
+        self.info_btn.setEnabled(True)
+        self.info_btn.setText("Info")
+        self.status_label.setText("Ready.")
+
+        mins = ""
+        if length_sec:
+            m, s = divmod(int(length_sec), 60)
+            if m >= 60:
+                h, m = divmod(m, 60)
+                mins = f"{h}h{m:02d}m{s:02d}s"
+            else:
+                mins = f"{m}m{s:02d}s"
+
+        size_str = f"{filesize_mb:.1f} MB" if filesize_mb else "unknown"
+
+        msg = f"<b>{title}</b><br>"
+        if mins:
+            msg += f"Length: {mins} &nbsp;|&nbsp; "
+        msg += f"Format: {fmt_note} &nbsp;|&nbsp; "
+        msg += f"Est. size: <b>{size_str}</b>"
+
+        if audio:
+            msg += f"<br><i>Audio-only mode. Resolution: {resolution}</i>"
+        else:
+            msg += f"<br><i>Video mode. Resolution: {resolution}</i>"
+
+        self.info_box.setText(msg)
+        self.info_box.show()
+
+    def _on_info_error(self, err: str) -> None:
+        self._info_worker = None
+        self.info_btn.setEnabled(True)
+        self.info_btn.setText("Info")
+        self.status_label.setText("Ready.")
+        self.info_box.setText(
+            f"<span style='color:#a62929;'>Error: {err}</span>"
+        )
+        self.info_box.show()
 
     def _add_urls_from_text(self, text: str) -> None:
         n_added = 0
@@ -819,27 +987,36 @@ class MainWindow(QWidget):
         )
         if d:
             self.dir_input.setText(d)
+            key = "download_audio" if self.audio_only_chk.isChecked() else "download_video"
+            self._save_dir(key, d)
 
     def _on_audio_toggled(self, checked: bool) -> None:
+        # Remember whatever folder is currently shown for the mode we're leaving,
+        # then restore the saved folder for the mode we're entering.
+        current = self.dir_input.text().strip()
         self.container_combo.clear()
         if checked:
+            self._save_dir("download_video", current)
             self.container_combo.addItems(AUDIO_CONTAINERS)
             self.container_combo.setCurrentText("mp3")
             self.res_combo.setEnabled(False)
             self.res_label.setEnabled(False)
             self.bitrate_combo.setEnabled(True)
             self.bitrate_label.setEnabled(True)
-            if self.dir_input.text().strip() == str(Path.home() / "Videos"):
-                self.dir_input.setText(str(Path.home() / "Music"))
+            self.dir_input.setText(
+                self._saved_dir("download_audio", Path.home() / "Music")
+            )
         else:
+            self._save_dir("download_audio", current)
             self.container_combo.addItems(VIDEO_CONTAINERS)
             self.container_combo.setCurrentText("mp4")
             self.res_combo.setEnabled(True)
             self.res_label.setEnabled(True)
             self.bitrate_combo.setEnabled(False)
             self.bitrate_label.setEnabled(False)
-            if self.dir_input.text().strip() == str(Path.home() / "Music"):
-                self.dir_input.setText(str(Path.home() / "Videos"))
+            self.dir_input.setText(
+                self._saved_dir("download_video", Path.home() / "Videos")
+            )
 
     def _on_clean_toggled(self, checked: bool) -> None:
         self.clean_tags_input.setEnabled(checked)
@@ -861,6 +1038,10 @@ class MainWindow(QWidget):
         if not Path(outdir).is_dir():
             QMessageBox.warning(self, "Bad folder", f"Folder does not exist: {outdir}")
             return
+        self._save_dir(
+            "download_audio" if self.audio_only_chk.isChecked() else "download_video",
+            outdir,
+        )
 
         self.batch       = list(self.current_batch)
         self.batch_idx   = 0
@@ -875,6 +1056,8 @@ class MainWindow(QWidget):
             parse_tag_list(self.clean_tags_input.text())
             if self.clean_chk.isChecked() else None
         )
+        self.embed_metadata  = self.embed_meta_chk.isChecked()
+        self.embed_thumbnail = self.embed_thumb_chk.isChecked()
 
         if self.skip_dup_chk.isChecked():
             archive_dir = Path.home() / ".config" / "chrisnov-media-toolkit"
@@ -968,6 +1151,8 @@ class MainWindow(QWidget):
             clean_tags=self.clean_tags,
             playlist=self._is_playlist_url(url),
             archive_path=getattr(self, "archive_path", None),
+            embed_metadata=getattr(self, "embed_metadata", False),
+            embed_thumbnail=getattr(self, "embed_thumbnail", False),
         )
         self.worker.progress.connect(self.dl_progress.setValue)
         self.worker.status.connect(self.status_label.setText)
@@ -1137,6 +1322,7 @@ class MainWindow(QWidget):
         )
         if d:
             self.conv_dir_input.setText(d)
+            self._save_dir("convert_audio", d)
 
     def _on_conv_fmt_changed(self, fmt: str) -> None:
         """Show/hide CBR/VBR and bitrate controls depending on format."""
@@ -1163,6 +1349,7 @@ class MainWindow(QWidget):
         if not outdir.is_dir():
             QMessageBox.warning(self, "Bad folder", f"Folder does not exist: {outdir}")
             return
+        self._save_dir("convert_audio", str(outdir))
 
         self._conv_queue  = list(self._conv_files)
         self._conv_idx    = 0
@@ -1320,6 +1507,7 @@ class MainWindow(QWidget):
         )
         if d:
             self.video_conv_dir_input.setText(d)
+            self._save_dir("convert_video", d)
 
     # ------------------------------------------------------------------ #
     #  Video converter — conversion flow                                  #
@@ -1333,6 +1521,7 @@ class MainWindow(QWidget):
         if not outdir.is_dir():
             QMessageBox.warning(self, "Bad folder", f"Folder does not exist: {outdir}")
             return
+        self._save_dir("convert_video", str(outdir))
 
         self._video_conv_queue = list(self._video_conv_files)
         self._video_conv_idx = 0

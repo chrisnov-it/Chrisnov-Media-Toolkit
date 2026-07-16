@@ -42,8 +42,8 @@ sharing it more broadly.
 - Verify taskbar/window icon behavior across source run and built `.exe`.
 - Smoke-test download, audio-only, Audio Converter, Video Converter, Add Folder,
   Cancel, and title cleanup on real-world files.
-- Add a visible version label in the app, for example `v0.1.0-beta.2`.
-- Add a simple About dialog with app name, version, build platform, and credits.
+- ~~Add a visible version label in the app, for example `v0.1.0-beta.2`.~~ *(done: window title + About dialog + header)*
+- ~~Add a simple About dialog with app name, version, build platform, and credits.~~ *(done)*
 
 ## UI & Usability
 
@@ -134,5 +134,5 @@ sharing it more broadly.
 - Per-site notes or presets if yt-dlp behavior differs across platforms.
 - Queue import/export as text.
 - Optional dark theme once the light UI is stable.
-- Local-only settings file for remembering preferred folders, formats, and
-  quality presets.
+- ~~Local-only settings file for remembering preferred folders, formats, and
+  quality presets.~~ *(done: QSettings remembers output folders per mode)*

@@ -23,8 +23,10 @@ if (-not (Test-Path "$venv\Scripts\python.exe")) {
     exit 1
 }
 
-Write-Host "==> Installing / upgrading PyInstaller..." -ForegroundColor Cyan
-& "$venv\Scripts\pip.exe" install -q --upgrade pyinstaller
+Write-Host "==> Installing PyInstaller..." -ForegroundColor Cyan
+# Pin to a known-good version to avoid CI surprise breakage.
+# Bump deliberately after local verification, not automatically.
+& "$venv\Scripts\pip.exe" install -q pyinstaller==6.17.0
 
 if ((Test-Path "icon.svg") -and -not (Test-Path $icon)) {
     Write-Host "==> Creating Windows icon..." -ForegroundColor Cyan
@@ -115,6 +117,69 @@ if ($Type -eq "Bundled" -or $Type -eq "Both") {
         Write-Host "==> Bundling FFmpeg: Found existing ffmpeg.exe and ffprobe.exe in '$binDir'." -ForegroundColor Cyan
     }
 }
+
+# -----------------------------------------------------------------------------
+# VERSIONINFO metadata — adds FileVersion / ProductVersion to the .exe
+# -----------------------------------------------------------------------------
+Write-Host "==> Preparing version_info.txt..." -ForegroundColor Cyan
+
+$appVersion = try {
+    # Try reading from app/constants.py
+    $match = Select-String -Path 'app\constants.py' -Pattern 'APP_VERSION\s*=\s*"([^"]+)"'
+    if ($match) { $match.Matches.Groups[1].Value } else { 'dev' }
+} catch { 'dev' }
+
+# Environment variable overrides local read (CI use-case)
+if ($env:APP_VERSION) {
+    $appVersion = $env:APP_VERSION
+}
+
+$versionArray = try {
+    # Parse semver, allow beta suffix like 0.1.0-beta.2
+    if ($appVersion -match '^(\d+)\.(\d+)\.(\d+)') {
+        [int]$Matches[1], [int]$Matches[2], [int]$Matches[3], 0
+    } else {
+        0, 0, 0, 0
+    }
+} catch { 0, 0, 0, 0 }
+
+$company = 'Christopher Novins'
+$desc   = 'Desktop toolkit for downloading and converting YouTube media with yt-dlp + FFmpeg'
+
+@"
+# See https://pyinstaller.org/en/stable/usage.html#embedding-version-information
+VSVersionInfo(
+  ffi=FixedFileInfo(
+    filevers=($($versionArray[0]), $($versionArray[1]), $($versionArray[2]), $($versionArray[3])),
+    prodvers=($($versionArray[0]), $($versionArray[1]), $($versionArray[2]), $($versionArray[3])),
+    mask=0x3f,
+    flags=0x0,
+    OS=0x40004,
+    fileType=0x1,
+    subtype=0x0,
+    date=(0, 0),
+  ),
+  kids=[
+    StringFileInfo([
+      StringTable(
+        '040904b0',  # US English, Unicode
+        [
+          StringStruct('CompanyName',     '$company'),
+          StringStruct('FileDescription', '$desc'),
+          StringStruct('FileVersion',     '$appVersion'),
+          StringStruct('InternalName',    'ChrisnovMediaToolkit'),
+          StringStruct('LegalCopyright',  '© $company'),
+          StringStruct('ProductName',     'Chrisnov Media Toolkit'),
+          StringStruct('ProductVersion',  '$appVersion'),
+        ]
+      ),
+    ]),
+    VarFileInfo([VarStruct('Translation', [0x0409, 0x04b0])]),
+  ],
+)
+"@ | Set-Content -LiteralPath 'version_info.txt' -Encoding UTF8
+
+Write-Host "  version_info.txt written (v$appVersion)" -ForegroundColor Green
 
 # -----------------------------------------------------------------------------
 # Clean previous build directories

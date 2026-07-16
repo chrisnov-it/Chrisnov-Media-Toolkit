@@ -22,6 +22,7 @@ archive_*.txt
 build/
 dist/
 icon.ico
+version_info.txt
 *.spec.bak
 
 # Misc
