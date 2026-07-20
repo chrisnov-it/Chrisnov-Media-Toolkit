@@ -8,6 +8,12 @@ All notable changes to this project are documented here.
 
 ### Added
 
+- **VERSIONINFO embedded in Windows executable** (`build-windows.ps1` +
+  `chrisnov-media-toolkit.spec`)
+  The build script generates a `version_info.txt` (VSVersionInfo) from
+  `APP_VERSION` and the spec embeds it when building on Windows. This
+  provides file-version metadata that helps reduce SmartScreen false
+  positives. `version_info.txt` is gitignored.
 - **Remember last used folders** (`app/window.py`)
   Output folders are now persisted per mode with `QSettings` under the
   key group `dirs/` — `download_video`, `download_audio`,
@@ -62,6 +68,10 @@ All notable changes to this project are documented here.
   `actions/setup-python` v5→v6, `actions/upload-artifact` v4→v6.
   Resolves the "Node.js 20 is deprecated" annotation GitHub
   surfaced after the September 2025 runner deprecation.
+- Removed internal docs (`AGENTS.md`, `WALKTHROUGH.md`, `ROADMAP.md`) from
+  git tracking via `git rm --cached` and added them to `.gitignore` —
+  these are local-only development notes. `test_opus.opus` also deleted
+  and gitignored.
 
 ---
 
