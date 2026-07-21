@@ -56,16 +56,21 @@ bash build-linux.sh
 # Output: dist/chrisnov-media-toolkit
 ```
 
-### Windows (single-file .exe)
+### Windows (packaged as .zip)
 
 ```powershell
 # In PowerShell from the project root:
 Set-ExecutionPolicy -Scope Process Bypass
 .\build-windows.ps1
-# Output: dist\chrisnov-media-toolkit.exe  (~53 MB in current builds)
+# Outputs: dist\chrisnov-media-toolkit-vX.Y.Z-windows-x64-lite.zip
+#          dist\chrisnov-media-toolkit-vX.Y.Z-windows-x64-bundled.zip
 ```
 
-For a custom Windows executable icon, place a hand-crafted `icon.ico` in the
+Each `.zip` contains the standalone `.exe`. Extract the zip, then
+double-click the `.exe` inside. For SmartScreen warnings, see the blog post
+or docs: this is expected for unsigned beta builds.
+
+For a custom Windows executable icon, place `icon.ico` in the
 project root before building. Without it, the `.exe` builds with the default
 Windows application icon; the in-app window icon still uses `icon.svg`.
 
@@ -88,7 +93,8 @@ Intel-Mac instructions and SHA256 verification.
 
 ```bash
 sudo apt install ffmpeg python3-venv
-cd ~/dev/Chrisnov-Media-Toolkit
+git clone https://github.com/chrisnov-it/Chrisnov-Media-Toolkit.git
+cd Chrisnov-Media-Toolkit
 python3 -m venv .venv
 .venv/bin/pip install -U pip
 .venv/bin/pip install PySide6 yt-dlp
@@ -101,7 +107,8 @@ python3 -m venv .venv
 # Install ffmpeg first (winget or choco), e.g.:
 winget install Gyan.FFmpeg
 
-cd %USERPROFILE%\dev\Chrisnov-Media-Toolkit
+git clone https://github.com/chrisnov-it/Chrisnov-Media-Toolkit.git
+cd Chrisnov-Media-Toolkit
 py -m venv .venv
 .venv\Scripts\pip install -U pip
 .venv\Scripts\pip install PySide6 yt-dlp
@@ -161,7 +168,7 @@ progress updates and terminate the FFmpeg subprocess when Cancel is clicked.
 
 ## License
 
-Private use.
+MIT License. See [LICENSE](LICENSE) for details.
 
 ---
 
