@@ -35,3 +35,9 @@ bin/
 
 # Scratch/test files
 scratch/
+test_opus.opus
+
+# Internal docs (not for public repo)
+AGENTS.md
+WALKTHROUGH.md
+ROADMAP.md
