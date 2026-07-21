@@ -175,33 +175,23 @@ MIT License. See [LICENSE](LICENSE) for details.
 ## Panduan Pengguna (Non-Technical)
 
 > Panduan ini ditujukan untuk pengguna yang belum terbiasa dengan aplikasi download.
-> Tidak perlu paham teknis — ikuti langkah di bawah saja.
+> Tidak perlu install Python atau membuka terminal — ikuti langkah di bawah saja.
 
-### Cara Pakai (Langkah Dasar)
+### Cara Pakai untuk Pengguna Biasa
 
-1. Buka aplikasi dengan menjalankan `main.py` (atau klik shortcut kalau sudah dibuat).
-   Jendela berlabel **Chrisnov Media Toolkit** akan muncul.
+1. Buka halaman **Releases** repo ini:  
+   [https://github.com/chrisnov-it/Chrisnov-Media-Toolkit/releases](https://github.com/chrisnov-it/Chrisnov-Media-Toolkit/releases)
+2. Download file `.zip` yang sesuai sistem kamu:
+   - `chrisnov-media-toolkit-vX.Y.Z-windows-x64-lite.zip`
+   - `chrisnov-media-toolkit-vX.Y.Z-windows-x64-bundled.zip`
+3. Klik kanan file `.zip` → **Extract All…** → pilih folder tujuan, lalu klik **Extract**.
+4. Buka folder hasil ekstraksi, lalu **double-click** file `.exe` yang ada di dalamnya.
+5. Jika muncul peringatan **Windows protected your PC** dari SmartScreen:
+   - Klik **More info** → **Run anyway**.
+   - Peringatan ini normal untuk aplikasi beta yang belum memiliki sertifikat digital. Aplikasi ini aman digunakan.
 
-2. Buka YouTube (atau situs lain yang didukung) di browser, lalu salin link videonya
-   (klik kanan pada video → *Copy video URL*, atau salin dari address bar).
-
-3. Tempel link tersebut ke kolom **Video URL** di aplikasi, lalu tekan **Enter**
-   atau klik **Add to queue**.
-
-4. Pilih mode unduhan:
-   - Mau **video**? Biarkan semua pengaturan pada default.
-   - Mau **audio/musik saja**? Centang **Audio only** — aplikasi otomatis
-     menyesuaikan folder tujuan dan memilihkan format audio.
-
-5. (Opsional) Klik **Info** untuk melihat judul, durasi, dan perkiraan ukuran
-   file sebelum mengunduh.
-
-6. Klik **Start**. Lihat progress bar dan pesan di bagian bawah jendela.
-
-7. Setelah selesai, file tersimpan di folder tujuan yang dipilih. Klik **Open**
-   di sebelah tombol Browse untuk langsung membukanya di file manager.
-
-8. Daftar antrian otomatis bersih setelah semua selesai diunduh.
+Setelah aplikasi terbuka, ikuti langkah penggunaan di bagian **Tips Cepat** atau baca
+penjelasan setiap tombol di **Pengaturan yang Perlu Diketahui**.
 
 ### Tips Cepat
 
