@@ -179,8 +179,8 @@ MIT License. See [LICENSE](LICENSE) for details.
 
 ### Cara Pakai untuk Pengguna Biasa
 
-1. Buka halaman **Releases** repo ini:  
-   [https://github.com/chrisnov-it/Chrisnov-Media-Toolkit/releases](https://github.com/chrisnov-it/Chrisnov-Media-Toolkit/releases)
+1. Buka halaman artikel resmi untuk panduan download:  
+   [https://chrisnov.com/blog/chrisnov-media-toolkit](https://chrisnov.com/blog/chrisnov-media-toolkit)
 2. Download file `.zip` yang sesuai sistem kamu:
    - `chrisnov-media-toolkit-vX.Y.Z-windows-x64-lite.zip`
    - `chrisnov-media-toolkit-vX.Y.Z-windows-x64-bundled.zip`
