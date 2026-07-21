@@ -143,7 +143,7 @@ $versionArray = try {
     }
 } catch { 0, 0, 0, 0 }
 
-$company = 'Christopher Novins'
+$company = 'Chrisnov IT Solutions'
 $desc   = 'Desktop toolkit for downloading and converting YouTube media with yt-dlp + FFmpeg'
 
 @"
