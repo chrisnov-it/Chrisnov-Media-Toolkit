@@ -15,7 +15,7 @@ on:
 jobs:
   build:
     name: Windows x64 Lite and Bundled EXE
-    runs-on: windows-latest
+    runs-on: windows-2022 # Pin to a specific version for stability
     timeout-minutes: 30
 
     env:
@@ -86,8 +86,52 @@ jobs:
             dist/chrisnov-media-toolkit-v*-windows-x64-bundled.zip.sha256
           if-no-files-found: error
 
-      - name: Upload to Cloudflare R2
-        shell: pwsh
+  release:
+    name: Create GitHub Release and Upload
+    runs-on: ubuntu-22.04
+    needs: build
+    if: ${{ github.event_name == 'push' || github.event_name == 'workflow_dispatch' }}
+    permissions:
+      contents: write
+
+    env:
+      APP_VERSION_RAW: ${{ github.event.inputs.version || github.ref_name }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Normalize version tag
+        shell: bash
+        run: |
+          RAW="${{ github.event.inputs.version || github.ref_name }}"
+          if [[ "$RAW" != v* ]]; then RAW="v$RAW"; fi
+          echo "TAG_NAME=$RAW" >> "$GITHUB_ENV"
+          echo "VERSION=${RAW#v}" >> "$GITHUB_ENV"
+
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v6
+        with:
+          path: artifacts/
+          pattern: chrisnov-media-toolkit-*
+          merge-multiple: true
+
+      - name: Prepare release metadata
+        id: prep
+        run: |
+          awk -v ver="${{ env.VERSION }}" '/^## \['"$ver"']/{flag=1; next} /^## \[/{flag=0} flag' CHANGELOG.md > release_notes.md
+
+      - name: Create GitHub Release and upload assets
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.TAG_NAME }}
+          name: Chrisnov Media Toolkit v${{ env.VERSION }}
+          body_path: release_notes.md
+          files: artifacts/*
+          fail_on_unmatched_files: true
+
+      - name: Upload all artifacts to Cloudflare R2
+        if: ${{ secrets.R2_ACCOUNT_ID != '' }}
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
@@ -95,12 +139,15 @@ jobs:
           R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
           R2_BUCKET: ${{ secrets.R2_BUCKET }}
         run: |
-          $endpoint = "https://${env:R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
-          $scripts = Join-Path $env:GITHUB_WORKSPACE ".venv\Scripts"
-          $env:PATH = "$scripts;$env:PATH"
-          $aws = (Get-Command aws -ErrorAction Stop).Source
+          ENDPOINT="https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
 
-          & $aws s3 cp "dist\${env:LITE_ZIP}"         "s3://${env:R2_BUCKET}/app/windows/${env:LITE_ZIP}"         --endpoint-url $endpoint
-          & $aws s3 cp "dist\${env:LITE_ZIP}.sha256"  "s3://${env:R2_BUCKET}/app/windows/${env:LITE_ZIP}.sha256"  --endpoint-url $endpoint
-          & $aws s3 cp "dist\${env:BUNDLED_ZIP}"        "s3://${env:R2_BUCKET}/app/windows/${env:BUNDLED_ZIP}"        --endpoint-url $endpoint
-          & $aws s3 cp "dist\${env:BUNDLED_ZIP}.sha256" "s3://${env:R2_BUCKET}/app/windows/${env:BUNDLED_ZIP}.sha256" --endpoint-url $endpoint
+          for file in artifacts/*; do
+            filename=$(basename "$file")
+            if [[ "$filename" == *"-windows-"* ]]; then
+              aws s3 cp "$file" "s3://${R2_BUCKET}/app/windows/$filename" --endpoint-url "${ENDPOINT}"
+            elif [[ "$filename" == *"-linux-"* ]]; then
+              aws s3 cp "$file" "s3://${R2_BUCKET}/app/linux/$filename" --endpoint-url "${ENDPOINT}"
+            elif [[ "$filename" == *"-macos-"* ]]; then
+              aws s3 cp "$file" "s3://${R2_BUCKET}/app/macos/$filename" --endpoint-url "${ENDPOINT}"
+            fi
+          done

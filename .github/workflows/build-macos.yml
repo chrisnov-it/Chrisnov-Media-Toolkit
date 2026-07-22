@@ -23,10 +23,10 @@ jobs:
         include:
           - arch: arm64
             runs_on: macos-latest
-            zip_suffix: arm64
+            zip_suffix: macos-arm64
           - arch: x86_64
-            runs_on: macos-15-intel
-            zip_suffix: x86_64
+            runs_on: macos-13 # macos-15-intel is deprecated, use macos-13 for Intel
+            zip_suffix: macos-x86_64
 
     env:
       APP_VERSION_RAW: ${{ github.event.inputs.version || github.ref_name }}
@@ -60,7 +60,7 @@ jobs:
 
       - name: Package app as ZIP
         run: |
-          ZIP_NAME="chrisnov-media-toolkit-v${APP_VERSION}-macos-${ZIP_SUFFIX}-lite.zip"
+          ZIP_NAME="chrisnov-media-toolkit-v${APP_VERSION}-${ZIP_SUFFIX}-lite.zip"
           ditto -c -k --sequesterRsrc --keepParent "dist/Chrisnov Media Toolkit.app" "dist/${ZIP_NAME}"
           (cd dist && shasum -a 256 "${ZIP_NAME}") > "dist/${ZIP_NAME}.sha256"
           echo "ZIP_NAME=${ZIP_NAME}" >> "$GITHUB_ENV"
@@ -68,13 +68,58 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v6
         with:
-          name: chrisnov-media-toolkit-macos-${{ matrix.zip_suffix }}-lite
+          name: macos-${{ matrix.zip_suffix }}-lite
           path: |
-            dist/chrisnov-media-toolkit-v*-macos-${{ matrix.zip_suffix }}-lite.zip
-            dist/chrisnov-media-toolkit-v*-macos-${{ matrix.zip_suffix }}-lite.zip.sha256
+            dist/chrisnov-media-toolkit-v*-${{ matrix.zip_suffix }}-lite.zip
+            dist/chrisnov-media-toolkit-v*-${{ matrix.zip_suffix }}-lite.zip.sha256
           if-no-files-found: error
 
-      - name: Upload to Cloudflare R2
+  release:
+    name: Create GitHub Release and Upload
+    runs-on: ubuntu-22.04
+    needs: build
+    if: ${{ github.event_name == 'push' || github.event_name == 'workflow_dispatch' }}
+    permissions:
+      contents: write
+
+    env:
+      APP_VERSION_RAW: ${{ github.event.inputs.version || github.ref_name }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Normalize version tag
+        shell: bash
+        run: |
+          RAW="${{ github.event.inputs.version || github.ref_name }}"
+          if [[ "$RAW" != v* ]]; then RAW="v$RAW"; fi
+          echo "TAG_NAME=$RAW" >> "$GITHUB_ENV"
+          echo "VERSION=${RAW#v}" >> "$GITHUB_ENV"
+
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v6
+        with:
+          path: artifacts/
+          merge-multiple: true
+
+      - name: Prepare release metadata
+        id: prep
+        run: |
+          VERSION="${{ env.VERSION }}"
+          awk -v ver="$VERSION" '/^## \['"$ver"'\]/{flag=1; next} /^## \[/{flag=0} flag' CHANGELOG.md > release_notes.md
+
+      - name: Create GitHub Release and upload assets
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.TAG_NAME }}
+          name: Chrisnov Media Toolkit v${{ env.VERSION }}
+          body_path: release_notes.md
+          files: artifacts/*/*
+          fail_on_unmatched_files: true
+
+      - name: Upload all artifacts to Cloudflare R2
+        if: ${{ secrets.R2_ACCOUNT_ID != '' }}
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
@@ -83,5 +128,14 @@ jobs:
           R2_BUCKET: ${{ secrets.R2_BUCKET }}
         run: |
           ENDPOINT="https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
-          aws s3 cp "dist/${ZIP_NAME}"        "s3://${R2_BUCKET}/app/macos/${ZIP_NAME}"        --endpoint-url "${ENDPOINT}"
-          aws s3 cp "dist/${ZIP_NAME}.sha256" "s3://${R2_BUCKET}/app/macos/${ZIP_NAME}.sha256" --endpoint-url "${ENDPOINT}"
+
+          for file in artifacts/*; do
+            filename=$(basename "$file")
+            if [[ "$filename" == *"-windows-"* ]]; then
+              aws s3 cp "$file" "s3://${R2_BUCKET}/app/windows/$filename" --endpoint-url "${ENDPOINT}"
+            elif [[ "$filename" == *"-linux-"* ]]; then
+              aws s3 cp "$file" "s3://${R2_BUCKET}/app/linux/$filename" --endpoint-url "${ENDPOINT}"
+            elif [[ "$filename" == *"-macos-"* ]]; then
+              aws s3 cp "$file" "s3://${R2_BUCKET}/app/macos/$filename" --endpoint-url "${ENDPOINT}"
+            fi
+          done
