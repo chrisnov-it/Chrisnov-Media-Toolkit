@@ -15,7 +15,7 @@ on:
 jobs:
   build:
     name: Linux x64 Lite TAR
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04 # Pin to a specific LTS version for stability
     timeout-minutes: 30
 
     env:
@@ -60,13 +60,58 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v6
         with:
-          name: chrisnov-media-toolkit-linux-x64-lite
+          name: linux-x64-lite
           path: |
             dist/chrisnov-media-toolkit-v*-linux-x64-lite.tar.gz
             dist/chrisnov-media-toolkit-v*-linux-x64-lite.tar.gz.sha256
           if-no-files-found: error
 
-      - name: Upload to Cloudflare R2
+  release:
+    name: Create GitHub Release and Upload
+    runs-on: ubuntu-22.04
+    needs: build
+    if: ${{ github.event_name == 'push' || github.event_name == 'workflow_dispatch' }}
+    permissions:
+      contents: write
+
+    env:
+      APP_VERSION_RAW: ${{ github.event.inputs.version || github.ref_name }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Normalize version tag
+        shell: bash
+        run: |
+          RAW="${{ github.event.inputs.version || github.ref_name }}"
+          if [[ "$RAW" != v* ]]; then RAW="v$RAW"; fi
+          echo "TAG_NAME=$RAW" >> "$GITHUB_ENV"
+          echo "VERSION=${RAW#v}" >> "$GITHUB_ENV"
+
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v6
+        with:
+          path: artifacts/
+          merge-multiple: true
+
+      - name: Prepare release metadata
+        id: prep
+        run: |
+          VERSION="${{ env.VERSION }}"
+          awk -v ver="$VERSION" '/^## \['"$ver"'\]/{flag=1; next} /^## \[/{flag=0} flag' CHANGELOG.md > release_notes.md
+
+      - name: Create GitHub Release and upload assets
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.TAG_NAME }}
+          name: Chrisnov Media Toolkit v${{ env.VERSION }}
+          body_path: release_notes.md
+          files: artifacts/*/*
+          fail_on_unmatched_files: true
+
+      - name: Upload all artifacts to Cloudflare R2
+        if: ${{ secrets.R2_ACCOUNT_ID != '' }}
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
@@ -75,5 +120,14 @@ jobs:
           R2_BUCKET: ${{ secrets.R2_BUCKET }}
         run: |
           ENDPOINT="https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
-          aws s3 cp "dist/${TAR_NAME}" "s3://${R2_BUCKET}/app/linux/${TAR_NAME}" --endpoint-url "${ENDPOINT}"
-          aws s3 cp "dist/${TAR_NAME}.sha256" "s3://${R2_BUCKET}/app/linux/${TAR_NAME}.sha256" --endpoint-url "${ENDPOINT}"
+
+          for file in artifacts/*; do
+            filename=$(basename "$file")
+            if [[ "$filename" == *"-windows-"* ]]; then
+              aws s3 cp "$file" "s3://${R2_BUCKET}/app/windows/$filename" --endpoint-url "${ENDPOINT}"
+            elif [[ "$filename" == *"-linux-"* ]]; then
+              aws s3 cp "$file" "s3://${R2_BUCKET}/app/linux/$filename" --endpoint-url "${ENDPOINT}"
+            elif [[ "$filename" == *"-macos-"* ]]; then
+              aws s3 cp "$file" "s3://${R2_BUCKET}/app/macos/$filename" --endpoint-url "${ENDPOINT}"
+            fi
+          done
