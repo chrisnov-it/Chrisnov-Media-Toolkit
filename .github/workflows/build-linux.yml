@@ -107,8 +107,12 @@ jobs:
           tag_name: ${{ env.TAG_NAME }}
           name: Chrisnov Media Toolkit v${{ env.VERSION }}
           body_path: release_notes.md
-          files: artifacts/*/*
-          fail_on_unmatched_files: true
+          files: |
+            artifacts/**/*.tar.gz
+            artifacts/**/*.zip
+            artifacts/**/*.sha256
+            artifacts/**/*.exe
+          fail_on_unmatched_files: false
 
       - name: Upload all artifacts to Cloudflare R2
         if: env.R2_ACCOUNT_ID != ''
