@@ -111,7 +111,7 @@ jobs:
           fail_on_unmatched_files: true
 
       - name: Upload all artifacts to Cloudflare R2
-        if: ${{ secrets.R2_ACCOUNT_ID != '' }}
+        if: env.R2_ACCOUNT_ID != ''
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
