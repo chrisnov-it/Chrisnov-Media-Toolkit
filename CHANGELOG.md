@@ -4,7 +4,46 @@ All notable changes to this project are documented here.
 
 ---
 
-## [0.1.0-beta.4] — 2026-07-16
+## [0.1.0-beta.5] — 2026-07-23
+
+### Added
+
+- **Download History tab** (`app/window.py`)
+  New 4th tab (📋 History) recording every completed and failed download.
+  Persisted to `~/.config/chrisnov-media-toolkit/download-history.json`
+  with a versioned JSON schema so history survives app restarts.
+  Includes search/filter (All / Audio / Video / Playlist), Clear All with
+  confirmation, and double-click to Open Folder or Re-download.
+
+### Fixed
+
+- **Info button vs Start button race** (`app/window.py`)
+  Pressing Start while the Info worker was still running spawned two
+  yt-dlp instances on the same URL. When an Info result arrived
+  mid-download it also clobbered the status label back to "Ready.",
+  making the download look stalled. Added `_dl_active` flag so Info
+  disables Start while fetching, and `_on_info_result` guards its status
+  reset behind `_dl_active`.
+
+- **macOS x86_64 build stuck in "queued"** (`.github/workflows/build-macos.yml`)
+  The Intel runner label was pinned to `macos-13`, which GitHub has retired
+  — no host backs it anymore, so the x86_64 leg queued indefinitely.
+  Updated to `macos-15-intel`; also pinned the arm64 leg to `macos-15`
+  for reproducible releases.
+
+- **Artifact storage quota exceeded** (`.github/workflows/build-*.yml`)
+  Free-plan 500 MB quota was hit (1.61 GB across 17 stale artifacts),
+  causing `Upload artifact` to fail on every build. Set `retention-days: 1`
+  on all three workflows and cleaned up old artifacts.
+
+### Documentation
+
+- `docs/OLD-MAC-WORKAROUND.md` — synced runner labels to `macos-15` +
+  `macos-15-intel` and removed stale Cloudflare R2 / "December 2025"
+  wording.
+- Added design spec for Download History.
+
+---
 
 ### Added
 
