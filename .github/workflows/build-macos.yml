@@ -22,10 +22,10 @@ jobs:
       matrix:
         include:
           - arch: arm64
-            runs_on: macos-latest
+            runs_on: macos-15 # Pin to a specific macOS image (arm64)
             zip_suffix: macos-arm64
           - arch: x86_64
-            runs_on: macos-13 # macos-15-intel is deprecated, use macos-13 for Intel
+            runs_on: macos-15-intel # Pin to the Intel image for x86_64
             zip_suffix: macos-x86_64
 
     env:
@@ -73,6 +73,7 @@ jobs:
             dist/chrisnov-media-toolkit-v*-${{ matrix.zip_suffix }}-lite.zip
             dist/chrisnov-media-toolkit-v*-${{ matrix.zip_suffix }}-lite.zip.sha256
           if-no-files-found: error
+          retention-days: 1
 
   release:
     name: Create GitHub Release and Upload
@@ -123,24 +124,5 @@ jobs:
             artifacts/**/*.dmg
           fail_on_unmatched_files: false
 
-      - name: Upload all artifacts to Cloudflare R2
-        if: env.R2_ACCOUNT_ID != ''
-        env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-          AWS_DEFAULT_REGION: auto
-          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
-          R2_BUCKET: ${{ secrets.R2_BUCKET }}
-        run: |
-          ENDPOINT="https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
-
-          for file in artifacts/*; do
-            filename=$(basename "$file")
-            if [[ "$filename" == *"-windows-"* ]]; then
-              aws s3 cp "$file" "s3://${R2_BUCKET}/app/windows/$filename" --endpoint-url "${ENDPOINT}"
-            elif [[ "$filename" == *"-linux-"* ]]; then
-              aws s3 cp "$file" "s3://${R2_BUCKET}/app/linux/$filename" --endpoint-url "${ENDPOINT}"
-            elif [[ "$filename" == *"-macos-"* ]]; then
-              aws s3 cp "$file" "s3://${R2_BUCKET}/app/macos/$filename" --endpoint-url "${ENDPOINT}"
-            fi
-          done
+      # R2 upload has been removed - all assets are now distributed
+      # via GitHub Releases. See README.md for download URLs.

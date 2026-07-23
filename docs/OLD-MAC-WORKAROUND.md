@@ -127,21 +127,21 @@ normal.
 The x86_64 zip is built by `.github/workflows/build-macos.yml` using
 a matrix over two runners:
 
-- `macos-latest` → Apple Silicon (M1/M2/M3+)
-- `macos-15-intel` → x86_64 Intel (4 vCPU / 14 GB RAM, supported
-  until August 2027)
+- `macos-15` → Apple Silicon (M1/M2/M3+)
+- `macos-15-intel` → x86_64 Intel (4 vCPU / 14 GB RAM)
 
-Each matrix leg publishes a separate zip and uploads it to Cloudflare
-R2 under `app/macos/`. Both legs complete in roughly 3 minutes total
-when run in parallel.
+Both labels are pinned (not `-latest`) so the build stays reproducible
+across releases. Each matrix leg publishes a separate zip and attaches
+it to the GitHub Release. Both legs complete in roughly 3 minutes
+total when run in parallel.
 
 ### Why we paused the Intel build (now resumed)
 
-GitHub's older `macos-13` Intel runner was retired in December 2025;
-builds on that image could queue for hours. The replacement
-`macos-15-intel` runner has more CPU and RAM than the Apple Silicon
-runner and a much shorter queue, so resuming the x86_64 leg became
-worthwhile.
+GitHub's older `macos-13` Intel runner was retired; builds on that
+image could queue for hours because no host backed the label anymore.
+The replacement `macos-15-intel` runner has more CPU and RAM than the
+Apple Silicon runner and a much shorter queue, so resuming the x86_64
+leg became worthwhile.
 
 ---
 
