@@ -50,7 +50,13 @@ class MainWindow(QWidget):
         self._inspect_worker: PlaylistInspectWorker | None = None
         self._info_worker: FileSizeWorker | None = None
         self._dl_active: bool = False
+        self._history_dir = Path.home() / ".config" / "chrisnov-media-toolkit"
+        self._history_path = self._history_dir / "download-history.json"
+        self._history: list[dict] = []
+        self._history_dir.mkdir(parents=True, exist_ok=True)
+        self._history_load()
         self._build_ui()
+        self._history_render()
 
     # ------------------------------------------------------------------ #
     #  Persistent folder settings (QSettings)                             #
@@ -74,6 +80,57 @@ class MainWindow(QWidget):
         """Open *path* in the system file manager."""
         if path and Path(path).is_dir():
             QDesktopServices.openUrl(QUrl.fromLocalFile(path))
+
+    # ------------------------------------------------------------------ #
+    #  Download history — JSON persistence                                 #
+    # ------------------------------------------------------------------ #
+
+    def _history_load(self) -> None:
+        """Load download history from JSON file."""
+        try:
+            data = json.loads(self._history_path.read_text(encoding="utf-8"))
+            if isinstance(data, dict) and data.get("version") == 1 and isinstance(data.get("items"), list):
+                self._history = data["items"]
+            else:
+                self._history = []
+        except (FileNotFoundError, json.JSONDecodeError, OSError):
+            self._history = []
+
+    def _history_save(self) -> None:
+        """Write download history to JSON file."""
+        try:
+            self._history_dir.mkdir(parents=True, exist_ok=True)
+            self._history_path.write_text(
+                json.dumps({"version": 1, "items": self._history}, indent=2, ensure_ascii=False),
+                encoding="utf-8",
+            )
+        except OSError:
+            pass
+
+    def _history_append(self, url: str, filepath: str, filename: str,
+                        filesize: int, type_: str, container: str,
+                        audio_only: bool, status: str, error: str | None = None) -> None:
+        """Append a download record to history and persist."""
+        entry: dict = {
+            "url": url,
+            "filepath": filepath,
+            "filename": filename,
+            "filesize_bytes": filesize,
+            "type": type_,
+            "container": container,
+            "audio_only": audio_only,
+            "timestamp": int(time.time()),
+            "status": status,
+        }
+        if error:
+            entry["error"] = error
+        self._history.insert(0, entry)
+        self._history_save()
+
+    def _history_clear(self) -> None:
+        """Clear all history and persist."""
+        self._history.clear()
+        self._history_save()
 
     # ------------------------------------------------------------------ #
     #  Drag-and-drop — route to active tab                                #
@@ -174,6 +231,7 @@ class MainWindow(QWidget):
         self._tabs.addTab(self._wrap_tab(self._build_downloader_tab()), "\u2b07  Downloader")
         self._tabs.addTab(self._wrap_tab(self._build_converter_tab()), "\u266b  Audio Converter")
         self._tabs.addTab(self._wrap_tab(self._build_video_converter_tab()), "\u25a3  Video Converter")
+        self._tabs.addTab(self._wrap_tab(self._build_history_tab()), "\U0001f4cb  History")
         root.addWidget(self._tabs)
 
     def _wrap_tab(self, widget: QWidget) -> QScrollArea:
@@ -843,6 +901,180 @@ class MainWindow(QWidget):
         return w
 
     # ------------------------------------------------------------------ #
+    #  Tab 4 — Download History                                             #
+    # ------------------------------------------------------------------ #
+
+    def _build_history_tab(self) -> QWidget:
+        """Build the Download History tab (tab 4)."""
+        w = QWidget()
+        root = QVBoxLayout(w)
+        root.setContentsMargins(10, 8, 10, 8)
+        root.setSpacing(5)
+
+        # Header
+        header = QHBoxLayout()
+        title = QLabel("Download History")
+        title.setStyleSheet("font-weight:600; font-size:10pt;")
+        header.addWidget(title)
+        self._history_summary = QLabel("")
+        self._history_summary.setStyleSheet("color:#8a94a0; font-size:8pt; padding-left:4px;")
+        header.addWidget(self._history_summary)
+        header.addStretch()
+        self._history_clear_btn = QPushButton("Clear All")
+        self._history_clear_btn.clicked.connect(self._on_history_clear)
+        header.addWidget(self._history_clear_btn)
+        root.addLayout(header)
+
+        # Search / filter row
+        filter_row = QHBoxLayout()
+        self._history_search = QLineEdit()
+        self._history_search.setPlaceholderText("Search by filename or URL...")
+        self._history_search.textChanged.connect(self._on_history_search_changed)
+        filter_row.addWidget(self._history_search, 1)
+        self._history_filter = QComboBox()
+        self._history_filter.addItems(["All", "Audio", "Video", "Playlist"])
+        self._history_filter.currentTextChanged.connect(self._on_history_search_changed)
+        filter_row.addWidget(self._history_filter)
+        root.addLayout(filter_row)
+
+        # Table-like list widget
+        self._history_list = QListWidget()
+        self._history_list.setMinimumHeight(150)
+        self._history_list.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self._history_list.setWordWrap(True)
+        self._history_list.itemDoubleClicked.connect(self._on_history_item_action)
+        root.addWidget(self._history_list, 1)
+
+        # Legend
+        legend = QLabel("\U0001f4c2 = Open folder   \U0001f501 = Download again")
+        legend.setStyleSheet("color:#8a94a0; font-size:7pt;")
+        legend.setAlignment(Qt.AlignCenter)
+        root.addWidget(legend)
+
+        # Empty state placeholder
+        self._history_empty = QLabel("No downloads yet.\nPress Start to begin downloading.")
+        self._history_empty.setAlignment(Qt.AlignCenter)
+        self._history_empty.setStyleSheet("color:#8a94a0; font-size:9pt; padding:40px;")
+        root.addWidget(self._history_empty)
+
+        return w
+
+    # ------------------------------------------------------------------ #
+    #  Download history — render, search, actions                          #
+    # ------------------------------------------------------------------ #
+
+    def _history_render(self, filter_text: str = "", filter_type: str = "All") -> None:
+        """Re-populate the history list widget from self._history with search/filter."""
+        self._history_list.clear()
+        query = filter_text.lower().strip()
+        n_total = len(self._history)
+        n_shown = 0
+        total_bytes = 0
+
+        for entry in self._history:
+            total_bytes += entry.get("filesize_bytes", 0)
+
+            # Filter by type
+            if filter_type != "All" and entry.get("type", "").lower() != filter_type.lower():
+                continue
+
+            # Search by filename or URL
+            if query:
+                haystack = (entry.get("filename", "") + " " + entry.get("url", "")).lower()
+                if query not in haystack:
+                    continue
+
+            n_shown += 1
+            filename = entry.get("filename", "?")
+            filesize = entry.get("filesize_bytes", 0)
+            status = entry.get("status", "?")
+            ts = entry.get("timestamp", 0)
+
+            # Relative time
+            delta = int(time.time()) - int(ts)
+            if delta < 60:
+                rel = "just now"
+            elif delta < 3600:
+                rel = f"{delta // 60}m ago"
+            elif delta < 86400:
+                rel = f"{delta // 3600}h ago"
+            else:
+                rel = f"{delta // 86400}d ago"
+
+            # Human-readable size
+            if filesize > 1e9:
+                size_str = f"{filesize / 1e9:.1f} GB"
+            elif filesize > 1e6:
+                size_str = f"{filesize / 1e6:.1f} MB"
+            elif filesize > 1e3:
+                size_str = f"{filesize / 1e3:.0f} KB"
+            else:
+                size_str = f"{filesize} B"
+
+            # Status color
+            completed = status == "completed"
+            type_icon = {"audio": "\U0001f3b5", "video": "\U0001f3ac", "playlist": "\U0001f4cb"}
+            icon = type_icon.get(entry.get("type", ""), "\U0001f4c1")
+
+            display = f"{icon}  {filename}  |  {size_str:>8s}  |  {rel:>10s}  |  {'✅' if completed else '❌'} {status}"
+            item = QListWidgetItem(display)
+            item.setData(Qt.UserRole, entry)
+            self._history_list.addItem(item)
+
+        # Update summary
+        size_total = ""
+        if total_bytes > 1e9:
+            size_total = f"{total_bytes / 1e9:.1f} GB"
+        elif total_bytes > 1e6:
+            size_total = f"{total_bytes / 1e6:.1f} MB"
+        self._history_summary.setText(
+            f"({n_total} items, {size_total} total)" if size_total else f"({n_total} items)"
+        )
+        self._history_empty.setVisible(n_shown == 0)
+
+    def _on_history_search_changed(self) -> None:
+        """Re-render history when search text or filter changes."""
+        self._history_render(
+            filter_text=self._history_search.text(),
+            filter_type=self._history_filter.currentText(),
+        )
+
+    def _on_history_clear(self) -> None:
+        """Clear all history after confirmation."""
+        if not self._history:
+            return
+        ans = QMessageBox.question(
+            self, "Clear history",
+            f"Delete all {len(self._history)} history entries?",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No,
+        )
+        if ans != QMessageBox.Yes:
+            return
+        self._history_clear()
+        self._history_render()
+
+    def _on_history_item_action(self, item: QListWidgetItem) -> None:
+        """Handle double-click on a history item: Open Folder or Re-download."""
+        entry = item.data(Qt.UserRole)
+        if not isinstance(entry, dict):
+            return
+
+        filepath = entry.get("filepath", "")
+        url = entry.get("url", "")
+        status = entry.get("status", "")
+
+        if filepath and Path(filepath).exists() and status == "completed":
+            # Open folder (most common action)
+            self._open_in_explorer(str(Path(filepath).parent))
+            return
+
+        if url:
+            # Re-download (for failed items or when file missing)
+            self.url_input.setText(url)
+            self._add_url(url)
+            self.status_label.setText(f"Re-queued: {entry.get('filename', url)}")
+
+    # ------------------------------------------------------------------ #
     #  Downloader — URL helpers                                            #
     # ------------------------------------------------------------------ #
 
@@ -1207,15 +1439,45 @@ class MainWindow(QWidget):
             self.status_label.setText(
                 f"Cleaned {len(renamed_list)} file(s), e.g. {renamed_list[0]!r}"
             )
+
+        # Record to history
+        url = self.batch[self.batch_idx] if self.batch_idx < len(self.batch) else ""
+        if isinstance(path, str) and (path.startswith("playlist_files:") or path.startswith("playlist:")):
+            self._history_append(
+                url=url, filepath=self.outdir, filename=path, filesize=0,
+                type_="playlist", container=self.container,
+                audio_only=self.audio_only, status="completed",
+            )
+        else:
+            p = Path(path)
+            self._history_append(
+                url=url, filepath=str(p), filename=p.name,
+                filesize=p.stat().st_size if p.exists() else 0,
+                type_="audio" if self.audio_only else "video",
+                container=self.container, audio_only=self.audio_only,
+                status="completed",
+            )
+
         self.batch_idx  += 1
         self.batch_done += 1
+        self._history_render()
         self._kick_next()
 
     def _on_item_fail(self, msg: str) -> None:
+        # Record to history
+        url = self.batch[self.batch_idx] if self.batch_idx < len(self.batch) else ""
+        self._history_append(
+            url=url, filepath="",
+            filename=url.split("/")[-1][:40] if url else "?",
+            filesize=0, type_="audio" if self.audio_only else "video",
+            container=self.container, audio_only=self.audio_only,
+            status="failed", error=msg,
+        )
         self.status_label.setText(
             f"[{self.batch_idx + 1}/{self.batch_total}] Error: {msg}"
         )
         self.batch_idx += 1
+        self._history_render()
         self._kick_next()
 
     def _cancel_download(self) -> None:
