@@ -49,6 +49,7 @@ class MainWindow(QWidget):
         self._video_conv_worker: VideoConvertWorker | None = None
         self._inspect_worker: PlaylistInspectWorker | None = None
         self._info_worker: FileSizeWorker | None = None
+        self._dl_active: bool = False
         self._build_ui()
 
     # ------------------------------------------------------------------ #
@@ -855,8 +856,16 @@ class MainWindow(QWidget):
             QMessageBox.warning(self, "Bad URL", "URL must start with http:// or https://")
             return
 
+        if self._dl_active:
+            QMessageBox.warning(
+                self, "Download in progress",
+                "Wait for the current download to finish before fetching info."
+            )
+            return
+
         self.info_btn.setEnabled(False)
         self.info_btn.setText("...")
+        self.download_btn.setEnabled(False)
         self.status_label.setText("Fetching info...")
 
         audio = self.audio_only_chk.isChecked()
@@ -875,7 +884,9 @@ class MainWindow(QWidget):
         self._info_worker = None
         self.info_btn.setEnabled(True)
         self.info_btn.setText("Info")
-        self.status_label.setText("Ready.")
+        if not self._dl_active:
+            self.status_label.setText("Ready.")
+            self.download_btn.setEnabled(True)
 
         mins = ""
         if length_sec:
@@ -906,7 +917,9 @@ class MainWindow(QWidget):
         self._info_worker = None
         self.info_btn.setEnabled(True)
         self.info_btn.setText("Info")
-        self.status_label.setText("Ready.")
+        if not self._dl_active:
+            self.status_label.setText("Ready.")
+            self.download_btn.setEnabled(True)
         self.info_box.setText(
             f"<span style='color:#a62929;'>Error: {err}</span>"
         )
@@ -1082,11 +1095,20 @@ class MainWindow(QWidget):
             )
             return
 
+        # Cancel any in-flight info fetch
+        if self._info_worker is not None and self._info_worker.isRunning():
+            self._info_worker.cancel()
+            self._info_worker.wait(3000)
+            self._info_worker = None
+            self.info_btn.setEnabled(True)
+            self.info_btn.setText("Info")
+
         # Disable UI immediately so the user can't double-submit
         self.download_btn.setEnabled(False)
         self.cancel_btn.setEnabled(True)
         self.add_queue_btn.setEnabled(False)
         self.url_input.setEnabled(False)
+        self._dl_active = True
 
         playlist_urls = [u for u in self.batch if self._is_playlist_url(u)]
         if playlist_urls:
@@ -1256,6 +1278,7 @@ class MainWindow(QWidget):
         self.cancel_btn.setEnabled(False)
         self.add_queue_btn.setEnabled(True)
         self.url_input.setEnabled(True)
+        self._dl_active = False
 
     # ------------------------------------------------------------------ #
     #  Converter — file list helpers                                       #
