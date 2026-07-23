@@ -443,10 +443,23 @@ class MainWindow(QWidget):
         desc.setStyleSheet("font-size: 9pt; color: #4a5568;")
         layout.addWidget(desc)
 
-        credit = QLabel("© Chrisnov IT Solutions")
+        credit = QLabel(
+            '<a href="https://chrisnov.com" style="color:#8a94a0;text-decoration:none;">'
+            '© Chrisnov IT Solutions</a>'
+        )
         credit.setAlignment(Qt.AlignCenter)
         credit.setStyleSheet("font-size: 8pt; color: #8a94a0; margin-top: 4px;")
+        credit.setOpenExternalLinks(True)
         layout.addWidget(credit)
+
+        gh_link = QLabel(
+            '<a href="https://github.com/chrisnov-it" style="color:#8a94a0;text-decoration:none;">'
+            "chrisnov-it on GitHub</a>"
+        )
+        gh_link.setAlignment(Qt.AlignCenter)
+        gh_link.setStyleSheet("font-size: 7pt; color: #8a94a0;")
+        gh_link.setOpenExternalLinks(True)
+        layout.addWidget(gh_link)
 
         # Close button
         layout.addSpacing(8)
