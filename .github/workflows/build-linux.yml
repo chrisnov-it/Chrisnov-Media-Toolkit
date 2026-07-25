@@ -17,6 +17,8 @@ jobs:
     name: Linux x64 Lite TAR
     runs-on: ubuntu-22.04 # Pin to a specific LTS version for stability
     timeout-minutes: 30
+    permissions:
+      contents: read
 
     env:
       APP_VERSION_RAW: ${{ github.event.inputs.version || github.ref_name }}
