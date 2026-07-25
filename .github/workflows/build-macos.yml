@@ -17,6 +17,8 @@ jobs:
     name: macOS ${{ matrix.arch }} Lite ZIP
     runs-on: ${{ matrix.runs_on }}
     timeout-minutes: 20
+    permissions:
+      contents: read
     strategy:
       fail-fast: false
       matrix:
