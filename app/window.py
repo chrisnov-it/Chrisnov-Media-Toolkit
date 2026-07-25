@@ -6,6 +6,7 @@ import json
 import sys
 import time
 from pathlib import Path
+from urllib.parse import urlparse
 
 from PySide6.QtCore import Qt, QSettings, QUrl
 from PySide6.QtGui import QDragEnterEvent, QDropEvent, QDesktopServices
@@ -1220,7 +1221,10 @@ class MainWindow(QWidget):
     def _is_playlist_url(url: str) -> bool:
         if "list=" not in url:
             return False
-        return "youtube.com" in url or "youtu.be" in url
+        host = (urlparse(url).hostname or "").lower()
+        if not host:
+            return False
+        return host == "youtu.be" or host == "youtube.com" or host.endswith(".youtube.com")
 
     def _remove_selected(self) -> None:
         # Collect rows descending so each pop/takeItem doesn't shift remaining indices
