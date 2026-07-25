@@ -21,7 +21,7 @@ from yt_dlp import YoutubeDL  # noqa: F401 — kept for potential future use in 
 
 from .constants import (
     APP_VERSION, RES_PRESETS, VIDEO_CONTAINERS, AUDIO_CONTAINERS, AUDIO_BITRATES,
-    PLAYLIST_CONFIRM_THRESHOLD,
+    PLAYLIST_CONFIRM_THRESHOLD, MAX_HISTORY_ENTRIES,
 )
 from .cleaner import (
     DEFAULT_CLEAN_TAGS, parse_tag_list, rename_with_cleanup, discover_new_files,
@@ -126,6 +126,9 @@ class MainWindow(QWidget):
         if error:
             entry["error"] = error
         self._history.insert(0, entry)
+        # Limit to most recent MAX_HISTORY_ENTRIES to keep JSON lightweight
+        if len(self._history) > MAX_HISTORY_ENTRIES:
+            self._history = self._history[:MAX_HISTORY_ENTRIES]
         self._history_save()
 
     def _history_clear(self) -> None:
@@ -1084,6 +1087,7 @@ class MainWindow(QWidget):
 
         if url:
             # Re-download (for failed items or when file missing)
+            self._tabs.setCurrentIndex(0)  # Switch to Downloader tab
             self.url_input.setText(url)
             self._add_url(url)
             self.status_label.setText(f"Re-queued: {entry.get('filename', url)}")
@@ -1433,6 +1437,7 @@ class MainWindow(QWidget):
 
     def _on_item_ok(self, path: str) -> None:
         renamed_list: list[str] = []
+        final_path_for_history: Path | None = None
         if isinstance(path, str) and path.startswith("playlist_files:"):
             try:
                 playlist_paths = json.loads(path.removeprefix("playlist_files:"))
@@ -1452,6 +1457,9 @@ class MainWindow(QWidget):
             new = rename_with_cleanup(path, self.clean_tags)
             if new is not None:
                 renamed_list.append(new.name)
+                final_path_for_history = new
+            else:
+                final_path_for_history = Path(path)
         if self.clean_tags and renamed_list:
             self.status_label.setText(
                 f"Cleaned {len(renamed_list)} file(s), e.g. {renamed_list[0]!r}"
@@ -1466,7 +1474,7 @@ class MainWindow(QWidget):
                 audio_only=self.audio_only, status="completed",
             )
         else:
-            p = Path(path)
+            p = final_path_for_history if final_path_for_history else Path(path)
             self._history_append(
                 url=url, filepath=str(p), filename=p.name,
                 filesize=p.stat().st_size if p.exists() else 0,
