@@ -31,6 +31,11 @@ i5-5200U / 7GB RAM / Intel HD 5500).
   `~/.config/chrisnov-media-toolkit/archive_*.txt` (separate for audio vs video).
   Anything re-queued gets skipped automatically.
 - **Drag-and-drop** — drop a URL, text, or a text file of URLs onto the window
+- **Download History** — automatically records all downloads (success/failed) with
+  filename, size, timestamp, and status. Search by filename or URL, filter by type
+  (audio/video/playlist). Double-click to open folder (if file exists) or re-download
+  (if failed). History limited to 1,000 most recent entries to keep storage lightweight.
+  Stored at `~/.config/chrisnov-media-toolkit/download-history.json`.
 - Pick output folder (defaults to `~/Videos` or `~/Music` on first run)
 - Live progress + speed (per item, e.g. "[2/5] Downloading...")
 - Cancel mid-batch
@@ -202,6 +207,9 @@ penjelasan setiap tombol di **Pengaturan yang Perlu Diketahui**.
 | Unduh seluruh playlist | Tempel link playlist langsung — semua episode otomatis masuk antrian |
 | Hapus tag "(Official Music Video)" dari nama file | Pastikan **Clean title** dicentang |
 | Lanjutkan unduhan yang sempat dibatalkan | Klik Start lagi — yang sudah diunduh otomatis dilewati |
+| Lihat riwayat unduhan | Buka tab **History**, cari/filter berdasarkan nama atau tipe file |
+| Buka folder file yang pernah diunduh | Tab **History**, double-click item yang statusnya ✅ |
+| Download ulang file yang gagal | Tab **History**, double-click item yang statusnya ❌ |
 | Ubah folder tujuan | Klik **Browse...** di samping kolom Output folder |
 | Convert satu folder album | Buka **Audio Converter**, klik **Add folder...**, pilih output, klik Convert |
 | Convert video lokal | Buka **Video Converter**, tambah file/folder, pilih format dan kualitas, klik Convert |
@@ -245,6 +253,12 @@ normalization, trim silence, dan Add folder untuk batch album.
 **Video Converter** — Mengubah video lokal ke mp4, mkv, atau webm. Preset
 kualitas: Keep quality, Balanced, Smaller file. Opsi "Keep original audio when
 possible" menjaga audio asli jika container mendukungnya.
+
+**History** — Tab **History** mencatat semua unduhan (berhasil/gagal) dengan
+nama file, ukuran, waktu, dan status. Cari berdasarkan nama file atau URL, filter
+berdasarkan tipe (Audio/Video/Playlist). Double-click item yang ✅ untuk buka
+folder, atau ❌ untuk download ulang. Riwayat dibatasi 1.000 entri terbaru agar
+tidak memakan storage berlebihan.
 
 ---
 
