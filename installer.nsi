@@ -25,6 +25,7 @@ ShowUnInstDetails show
 
 ; Pages
 !insertmacro MUI_PAGE_WELCOME
+!insertmacro MUI_PAGE_WELCOME
 !insertmacro MUI_PAGE_LICENSE "LICENSE"
 !insertmacro MUI_PAGE_COMPONENTS
 !insertmacro MUI_PAGE_DIRECTORY
@@ -70,7 +71,7 @@ Section "Core Files (required)" SecCore
   WriteRegStr ${PRODUCT_UNINST_ROOT_KEY} "${PRODUCT_UNINST_KEY}" "InstallLocation" "$INSTDIR"
 SectionEnd
 
-Section /o "FFmpeg Bundled (for Lite builds)" SecBundled
+Section /o "Include FFmpeg (~150 MB)" SecBundled
   SetOutPath "$INSTDIR\bin"
   File "bin\ffmpeg.exe"
   File "bin\ffprobe.exe"
@@ -79,7 +80,7 @@ SectionEnd
 ; Section descriptions
 !insertmacro MUI_FUNCTION_DESCRIPTION_BEGIN
   !insertmacro MUI_DESCRIPTION_TEXT ${SecCore} "Main application executable. Required."
-  !insertmacro MUI_DESCRIPTION_TEXT ${SecBundled} "Include FFmpeg binaries (recommended if you don't have FFmpeg installed system-wide). Lite users can skip this."
+  !insertmacro MUI_DESCRIPTION_TEXT ${SecBundled} "Include FFmpeg binaries (~150 MB additional). Required for audio/video conversion and local file conversion. Skip this if FFmpeg is already installed on your system (recommended for advanced users)."
 !insertmacro MUI_FUNCTION_DESCRIPTION_END
 
 ; Desktop shortcut function
