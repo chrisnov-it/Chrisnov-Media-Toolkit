@@ -46,10 +46,11 @@ Section "Core Files (required)" SecCore
   SectionIn RO
   SetOutPath "$INSTDIR"
   
-  ; Placeholder — actual .exe will be copied by build script
-  ; File "dist\chrisnov-media-toolkit-lite.exe"
-  ; For now, assume build-windows.yml renames to chrisnov-media-toolkit.exe
+  ; Main executable
   File "dist\chrisnov-media-toolkit.exe"
+  
+  ; Icon file (needed for runtime)
+  File "icon.svg"
   
   ; Create Start Menu shortcut
   CreateDirectory "$SMPROGRAMS\${PRODUCT_NAME}"
@@ -71,9 +72,8 @@ SectionEnd
 
 Section /o "FFmpeg Bundled (for Lite builds)" SecBundled
   SetOutPath "$INSTDIR\bin"
-  ; Placeholder — actual ffmpeg.exe + ffprobe.exe copied by build script if Bundled selected
-  ; File "bin\ffmpeg.exe"
-  ; File "bin\ffprobe.exe"
+  File "bin\ffmpeg.exe"
+  File "bin\ffprobe.exe"
 SectionEnd
 
 ; Section descriptions
@@ -90,6 +90,7 @@ FunctionEnd
 ; Uninstaller
 Section Uninstall
   Delete "$INSTDIR\chrisnov-media-toolkit.exe"
+  Delete "$INSTDIR\icon.svg"
   Delete "$INSTDIR\bin\ffmpeg.exe"
   Delete "$INSTDIR\bin\ffprobe.exe"
   Delete "$INSTDIR\uninst.exe"
