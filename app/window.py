@@ -376,6 +376,7 @@ class MainWindow(QWidget):
     def _show_about(self) -> None:
         """Show the About dialog with version, runtime, and dependency info."""
         import importlib.metadata as meta
+        import subprocess
 
         def _ver(pkg: str) -> str:
             try:
@@ -383,8 +384,26 @@ class MainWindow(QWidget):
             except meta.PackageNotFoundError:
                 return "n/a"
 
+        def _ffmpeg_ver() -> str:
+            """Get FFmpeg version from ffmpeg or ffprobe binary."""
+            for cmd in ("ffmpeg", "ffprobe"):
+                try:
+                    result = subprocess.run(
+                        [cmd, "-version"],
+                        capture_output=True, text=True, timeout=5
+                    )
+                    if result.returncode == 0:
+                        # Look for version line, e.g. "ffmpeg version 6.1.1"
+                        for line in result.stderr.splitlines():
+                            if line.startswith(("ffmpeg version", "ffprobe version")):
+                                return line.split("version")[1].strip()
+                except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+                    continue
+            return "n/a"
+
         pyside_ver = _ver("PySide6")
         ytdlp_ver  = _ver("yt-dlp")
+        ffmpeg_ver = _ffmpeg_ver()
 
         platform_str = {
             "win32":  "Windows",
@@ -436,6 +455,29 @@ class MainWindow(QWidget):
         _row("Python",    py_ver)
         _row("PySide6",   pyside_ver)
         _row("yt-dlp",    ytdlp_ver)
+        _row("FFmpeg",    ffmpeg_ver)
+        
+        # Check for newer versions and show update notice
+        newer_versions = []
+        try:
+            import urllib.request
+            import json
+            # Check yt-dlp latest version from PyPI
+            try:
+                with urllib.request.urlopen("https://pypi.org/pypi/yt-dlp/json", timeout=3) as resp:
+                    ytdlp_latest = json.loads(resp.read())["info"]["version"]
+                    if ytdlp_ver != "n/a" and ytdlp_ver != ytdlp_latest:
+                        newer_versions.append(f"yt-dlp: {ytdlp_ver} → {ytdlp_latest}")
+            except Exception:
+                pass
+        except Exception:
+            pass
+        
+        if newer_versions:
+            notice = QLabel(f"Update available: {', '.join(newer_versions)}")
+            notice.setStyleSheet("color: #e53e3e; font-size: 9pt; margin-top: 8px;")
+            notice.setAlignment(Qt.AlignCenter)
+            layout.addWidget(notice)
 
         # Divider
         line2 = QLabel()
