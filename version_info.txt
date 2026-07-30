@@ -1,0 +1,30 @@
+# See https://pyinstaller.org/en/stable/usage.html#embedding-version-information
+VSVersionInfo(
+  ffi=FixedFileInfo(
+    filevers=(0, 2, 0, 1),
+    prodvers=(0, 2, 0, 1),
+    mask=0x3f,
+    flags=0x0,
+    OS=0x40004,
+    fileType=0x1,
+    subtype=0x0,
+    date=(0, 0),
+  ),
+  kids=[
+    StringFileInfo([
+      StringTable(
+        '040904b0',  # US English, Unicode
+        [
+          StringStruct('CompanyName',     'Chrisnov IT Solutions'),
+          StringStruct('FileDescription', 'Desktop toolkit for downloading and converting media from YouTube, Vimeo, Dailymotion, Instagram with yt-dlp + FFmpeg'),
+          StringStruct('FileVersion',     '0.2.0-beta.1'),
+          StringStruct('InternalName',    'ChrisnovMediaToolkit'),
+          StringStruct('LegalCopyright',  '© Chrisnov IT Solutions'),
+          StringStruct('ProductName',     'Chrisnov Media Toolkit'),
+          StringStruct('ProductVersion',  '0.2.0-beta.1'),
+        ]
+      ),
+    ]),
+    VarFileInfo([VarStruct('Translation', [0x0409, 0x04b0])]),
+  ],
+)
