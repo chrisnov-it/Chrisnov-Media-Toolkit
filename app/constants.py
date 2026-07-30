@@ -1,6 +1,6 @@
 """UI constants — combobox option lists and presets."""
 
-APP_VERSION = "0.1.0-beta.5"
+APP_VERSION = "0.2.0-beta.1"
 
 RES_PRESETS = [
     ("Best (no limit)", None),

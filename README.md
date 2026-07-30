@@ -6,7 +6,7 @@ i5-5200U / 7GB RAM / Intel HD 5500).
 
 ## Features
 
-- Paste any yt-dlp-supported URL (YouTube and 1000+ sites)
+- Paste any yt-dlp-supported URL (YouTube, Vimeo, Dailymotion, Instagram, TikTok, and 1000+ sites)
 - **Audio-only mode** — extracts soundtrack with selectable bitrate (96/128/160/192/256/320 kbps)
 - **Remembers last folder** — the output folder you picked for each mode
   (video download, audio download, audio convert, video convert) is saved and
@@ -24,9 +24,13 @@ i5-5200U / 7GB RAM / Intel HD 5500).
 - Resolution presets: Best / 1080p / 720p / 480p / 360p
 - Container choice: mp4 / mkv / webm (video) or mp3 / m4a / opus (audio)
 - **Batch queue** — add many URLs, removes the need to babysit each download
-- **Playlist support** — paste a `youtube.com` or `music.youtube.com` playlist URL and
+- **Playlist support** — paste a playlist URL from YouTube, Vimeo, or Dailymotion and
   the whole list expands. Large playlists (>50 entries) ask for confirmation with a size
   estimate.
+- **Browser impersonation** — mimics Chrome browser to bypass anti-scraper protection
+  on platforms like Dailymotion, Vimeo, and Instagram
+- **Cookie support** — download from private/age-restricted content by using browser
+  cookies (auto-detect from Chrome) or loading a cookies.txt file
 - **Skip duplicates** — yt-dlp `download_archive` keeps a history file at
   `~/.config/chrisnov-media-toolkit/archive_*.txt` (separate for audio vs video).
   Anything re-queued gets skipped automatically.
@@ -102,7 +106,7 @@ git clone https://github.com/chrisnov-it/Chrisnov-Media-Toolkit.git
 cd Chrisnov-Media-Toolkit
 python3 -m venv .venv
 .venv/bin/pip install -U pip
-.venv/bin/pip install PySide6 yt-dlp
+.venv/bin/pip install PySide6 yt-dlp curl_cffi
 .venv/bin/python main.py
 ```
 
@@ -116,7 +120,7 @@ git clone https://github.com/chrisnov-it/Chrisnov-Media-Toolkit.git
 cd Chrisnov-Media-Toolkit
 py -m venv .venv
 .venv\Scripts\pip install -U pip
-.venv\Scripts\pip install PySide6 yt-dlp
+.venv\Scripts\pip install PySide6 yt-dlp curl_cffi
 .venv\Scripts\python main.py
 ```
 
@@ -141,7 +145,8 @@ Chrisnov-Media-Toolkit/
 GUI runs in the main thread; downloads happen in `DownloadWorker` (`QThread`)
 so the UI stays responsive. The worker uses yt-dlp's Python API directly
 (`YoutubeDL.extract_info(download=True)`), passing `download_archive` for
-de-duplication and a `progress_hooks` callback for live status updates.
+de-duplication, `progress_hooks` for live status, `impersonate` for browser
+mimicry, and optional `cookies`/`cookies_from_browser` for authenticated content.
 
 After each download completes, `MainWindow._on_item_ok` calls
 `rename_with_cleanup` (single file) or `discover_new_files` + loop
@@ -152,9 +157,10 @@ then `FFmpegExtractAudio` converts it to the chosen container (`.mp3`, `.m4a`,
 `.opus`). The worker corrects the path extension before passing it to the
 rename step so cleanup always targets the actual file on disk.
 
-Playlist mode is auto-detected via `list=` in the URL. Before kicking
-off any playlist >50 entries, `_confirm_playlists` does a dry `extract_info`
-to count and asks for confirmation with a size estimate.
+Playlist mode is auto-detected for YouTube, Vimeo, Instagram, and Dailymotion
+via `list=` parameter or platform-specific detection. Before kicking off any
+playlist >50 entries, `_confirm_playlists` does a dry `extract_info` to count
+and asks for confirmation with a size estimate.
 
 Local audio/video conversion uses FFmpeg through `ConvertWorker` and
 `VideoConvertWorker`. The workers parse `ffmpeg -progress` output for live
@@ -166,10 +172,13 @@ progress updates and terminate the FFmpeg subprocess when Cancel is clicked.
   (or `archive_video.txt`). Delete these files to re-download from scratch.
 - No GPU mode change needed. Intel Power Saving is fine for this GUI.
 - yt-dlp is bundled via the venv, so a system yt-dlp install is optional.
-- To update yt-dlp later: `.venv/bin/pip install -U yt-dlp`
+- **curl_cffi required** for browser impersonation: `pip install curl_cffi`
+- To update yt-dlp later: `.venv/bin/pip install -U yt-dlp curl_cffi`
 - App icon: `icon.svg` (auto-loaded from project root). To customise, replace that file
   with any valid SVG.
 - On Windows 11 the taskbar gets the same icon automatically (via AppUserModelID).
+- Cookie files are stored at the path you select; browser cookies are auto-detected
+  from Chrome's default profile location.
 
 ## License
 
@@ -206,6 +215,8 @@ penjelasan setiap tombol di **Pengaturan yang Perlu Diketahui**.
 | Unduh beberapa video sekaligus | Tambahkan satu per satu ke antrian, baru klik Start |
 | Unduh seluruh playlist | Tempel link playlist langsung — semua episode otomatis masuk antrian |
 | Hapus tag "(Official Music Video)" dari nama file | Pastikan **Clean title** dicentang |
+| Unduh dari Dailymotion/Instagram/Vimeo | Sudah didukung! Pastikan `curl_cffi` terinstall |
+| Unduh konten private (Instagram/Vimeo) | Centang **Use browser cookies** atau pilih cookie file |
 | Lanjutkan unduhan yang sempat dibatalkan | Klik Start lagi — yang sudah diunduh otomatis dilewati |
 | Lihat riwayat unduhan | Buka tab **History**, cari/filter berdasarkan nama atau tipe file |
 | Buka folder file yang pernah diunduh | Tab **History**, double-click item yang statusnya ✅ |
@@ -241,6 +252,13 @@ dipilih di file manager sistem kamu.
 **Clean title** — Menghapus tag seperti "Official Music Video", "Video Lirik", dll.
 dari nama file secara otomatis. Bisa tambah tag sendiri di kotak teksnya (pisahkan
 dengan koma).
+
+**Use browser cookies** — Aktifkan untuk mengunduh konten yang memerlukan
+login/autentikasi (Instagram private, Vimeo terbatas, dll.). App akan otomatis
+mengambil cookies dari browser Chrome.
+
+**Cookie file...** — Alternatif dari browser cookies, Anda bisa load cookie dari
+file `cookies.txt` yang diexport dari browser.
 
 **Skip duplicates** — Kalau dicentang (default), video/lagu yang pernah diunduh
 sebelumnya akan dilewati otomatis. Berguna saat melanjutkan unduhan yang berhenti
@@ -315,3 +333,22 @@ tidak memakan storage berlebihan.
 **Q: Saya ingin integrasikan ke script sendiri.**
 - Gunakan `yt-dlp` langsung via CLI: `yt-dlp -S "res:720,f:mp4" <url>`.
   Aplikasi ini hanya tampilan GUI di atasnya.
+
+**Q: Dailymotion/Vimeo/Instagram gagal diunduh.**
+- Pastikan `curl_cffi` terinstall: `pip install curl_cffi`.
+- Platform-platform ini memblokir request default yt-dlp, jadi butuh browser
+  impersonation yang sudah ditambahkan di app.
+- Untuk konten private (Instagram akun private, Vimeo video terbatas):
+  - Centang **"Use browser cookies"** di UI, atau
+  - Klik **"Cookie file..."** dan pilih file `cookies.txt` dari browser Anda
+
+**Q: Bagaimana cara export cookies dari browser?**
+- **Chrome/Edge:** Gunakan extension "Get cookies.txt" dari Chrome Web Store.
+  Buka halaman yang ingin diunduh, klik extension, dan save cookies.
+- **Firefox:** Gunakan extension "Cookie-Editor" dan export sebagai cookies.txt.
+- File cookies.txt dari browser lain (Brave, Opera, dll.) biasanya juga kompatibel.
+
+**Q: Apakah platform X didukung?**
+- Cek daftar lengkap: `yt-dlp --list-extractors`
+- App ini mendukung **semua platform yang didukung yt-dlp**
+- Beberapa platform butuh impersonation (sudah aktif) dan/atau cookies
