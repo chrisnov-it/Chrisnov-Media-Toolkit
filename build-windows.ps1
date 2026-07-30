@@ -144,7 +144,7 @@ $versionArray = try {
 } catch { 0, 0, 0, 0 }
 
 $company = 'Chrisnov IT Solutions'
-$desc   = 'Desktop toolkit for downloading and converting YouTube media with yt-dlp + FFmpeg'
+$desc   = 'Desktop toolkit for downloading and converting media from YouTube, Vimeo, Dailymotion, Instagram, TikTok, and 1000+ sites with yt-dlp + FFmpeg'
 
 @"
 # See https://pyinstaller.org/en/stable/usage.html#embedding-version-information
