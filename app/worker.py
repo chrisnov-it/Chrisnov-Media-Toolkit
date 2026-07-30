@@ -25,7 +25,8 @@ class DownloadWorker(QThread):
                  outdir: str, audio_only: bool = False, idx_label: str = "",
                  clean_tags: list[str] | None = None, playlist: bool = False,
                  archive_path: str | None = None, embed_metadata: bool = False,
-                 embed_thumbnail: bool = False):
+                 embed_thumbnail: bool = False, cookie_path: str | None = None,
+                 cookies_from_browser: bool = False):
         super().__init__()
         self.url = url
         self.height = height
@@ -39,6 +40,8 @@ class DownloadWorker(QThread):
         self.archive_path = archive_path
         self.embed_metadata = embed_metadata
         self.embed_thumbnail = embed_thumbnail
+        self.cookie_path = cookie_path
+        self.cookies_from_browser = cookies_from_browser
         self._cancelled = False
 
     def cancel(self) -> None:
@@ -123,8 +126,27 @@ class DownloadWorker(QThread):
             "no_warnings": True,
             "progress_hooks": [self._hook],
         }
+        # Add browser impersonation for platforms that require it (Dailymotion, Vimeo, Instagram, etc.)
+        # Try to use ImpersonateTarget for newer yt-dlp versions, fall back to string for older versions
+        try:
+            from yt_dlp.networking.impersonate import ImpersonateTarget
+            try:
+                # Try with a commonly available target
+                opts["impersonate"] = ImpersonateTarget.from_str("chrome")
+            except Exception:
+                # Fall back to string for older yt-dlp
+                opts["impersonate"] = "chrome"
+        except ImportError:
+            # Older yt-dlp without impersonate module
+            opts["impersonate"] = "chrome"
         if self.archive_path:
             opts["download_archive"] = self.archive_path
+
+        # Add cookie support for platforms that require authentication (Instagram, Vimeo private, etc.)
+        if self.cookies_from_browser:
+            opts["cookies_from_browser"] = ("chrome",)
+        elif self.cookie_path and Path(self.cookie_path).exists():
+            opts["cookies"] = self.cookie_path
 
         # Download the thumbnail file so EmbedThumbnail has something to embed.
         if self.embed_thumbnail and self._thumbnail_supported():
@@ -230,11 +252,14 @@ class PlaylistInspectWorker(QThread):
     error    = Signal(str, str)
 
     def __init__(self, playlist_urls: list[str], audio_only: bool,
-                 threshold: int):
+                 threshold: int, cookie_path: str | None = None,
+                 cookies_from_browser: bool = False):
         super().__init__()
         self.playlist_urls = playlist_urls
         self.audio_only    = audio_only
         self.threshold     = threshold
+        self.cookie_path = cookie_path
+        self.cookies_from_browser = cookies_from_browser
         self._cancelled    = False
 
     def cancel(self) -> None:
@@ -245,6 +270,22 @@ class PlaylistInspectWorker(QThread):
             "quiet": True, "no_warnings": True,
             "skip_download": True, "extract_flat": True,
         }
+        # Add browser impersonation
+        try:
+            from yt_dlp.networking.impersonate import ImpersonateTarget
+            try:
+                dry_opts["impersonate"] = ImpersonateTarget.from_str("chrome")
+            except Exception:
+                dry_opts["impersonate"] = "chrome"
+        except ImportError:
+            dry_opts["impersonate"] = "chrome"
+        
+        # Add cookie support for playlist inspection
+        if self.cookies_from_browser:
+            dry_opts["cookies_from_browser"] = ("chrome",)
+        elif self.cookie_path and Path(self.cookie_path).exists():
+            dry_opts["cookies"] = self.cookie_path
+        
         total = len(self.playlist_urls)
         big: list[tuple[str, int, str, str]] = []
         for i, p_url in enumerate(self.playlist_urls, 1):
@@ -283,12 +324,15 @@ class FileSizeWorker(QThread):
     result = Signal(str, object, object, str, bool, str)  # title, duration, size, note, audio, res
     error  = Signal(str)
 
-    def __init__(self, url: str, audio_only: bool, height: int | None, fmt: str):
+    def __init__(self, url: str, audio_only: bool, height: int | None, fmt: str,
+                 cookie_path: str | None = None, cookies_from_browser: bool = False):
         super().__init__()
         self.url = url
         self.audio_only = audio_only
         self.height = height
         self.fmt = fmt
+        self.cookie_path = cookie_path
+        self.cookies_from_browser = cookies_from_browser
 
     def run(self) -> None:
         try:
@@ -297,6 +341,22 @@ class FileSizeWorker(QThread):
                 "no_warnings": True,
                 "skip_download": True,
             }
+            # Add browser impersonation
+            try:
+                from yt_dlp.networking.impersonate import ImpersonateTarget
+                try:
+                    opts["impersonate"] = ImpersonateTarget.from_str("chrome")
+                except Exception:
+                    opts["impersonate"] = "chrome"
+            except ImportError:
+                opts["impersonate"] = "chrome"
+            
+            # Add cookie support for metadata fetching
+            if self.cookies_from_browser:
+                opts["cookies_from_browser"] = ("chrome",)
+            elif self.cookie_path and Path(self.cookie_path).exists():
+                opts["cookies"] = self.cookie_path
+            
             if self.audio_only:
                 opts["format"] = "ba/b"
             elif self.height:
