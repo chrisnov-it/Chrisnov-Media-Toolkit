@@ -4,6 +4,53 @@ All notable changes to this project are documented here.
 
 ---
 
+## [0.2.0-beta.1] — 2026-07-30
+
+### Added
+
+- **Multi-platform support** (`app/worker.py`, `app/window.py`)
+  Browser impersonation (Chrome) added to all yt-dlp workers, enabling downloads
+  from Dailymotion, Vimeo, and Instagram which actively block default yt-dlp
+  user-agents. Uses `curl_cffi` for impersonation with graceful fallback for
+  older yt-dlp versions.
+
+- **Cookie support** (`app/worker.py`, `app/window.py`)
+  Two options for authenticated content (Instagram private, Vimeo private, etc.):
+  - **Use browser cookies**: Auto-detect and use cookies from Chrome
+  - **Cookie file**: Load cookies from a `cookies.txt` file exported from browser
+  Settings persisted via QSettings. Cookie options passed to all workers
+  (DownloadWorker, PlaylistInspectWorker, FileSizeWorker).
+
+- **Extended playlist detection** (`app/window.py`)
+  `_is_playlist_url()` now recognizes playlist URLs from:
+  - YouTube (youtube.com, youtu.be, *.youtube.com)
+  - Vimeo (vimeo.com, player.vimeo.com)
+  - Instagram (instagram.com, www.instagram.com)
+  - Dailymotion (dailymotion.com, www.dailymotion.com)
+
+- **Improved URL display** (`app/window.py`)
+  Queue items now show platform-appropriate identifiers:
+  - YouTube: `[v=XXXXX]` or `📋 list=XXXXX`
+  - Vimeo: `[video_id]` from path
+  - Instagram/Dailymotion: `[post_id]` from path
+
+### Fixed
+
+- **Dailymotion downloads failing**
+  Resolved by adding browser impersonation (`impersonate: chrome`).
+
+- **Vimeo public videos failing**
+  Resolved by adding browser impersonation.
+
+- **Instagram public content failing**
+  Resolved by adding browser impersonation. Private content now works with cookies.
+
+### Dependencies
+
+- Added `curl_cffi>=0.15.0` as a **required** dependency for browser impersonation.
+
+---
+
 ## [0.1.0-beta.5] — 2026-07-23
 
 ### Added
