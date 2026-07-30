@@ -56,6 +56,11 @@ class MainWindow(QWidget):
         self._history: list[dict] = []
         self._history_dir.mkdir(parents=True, exist_ok=True)
         self._history_load()
+        
+        # Cookie settings for authenticated downloads (Instagram, Vimeo private, etc.)
+        self.cookie_path = self._settings.value("cookie_path", "", type=str)
+        self.cookies_from_browser = self._settings.value("cookies_from_browser", False, type=bool)
+        
         self._build_ui()
         self._history_render()
 
@@ -544,6 +549,28 @@ class MainWindow(QWidget):
         chk_row2.addWidget(self.embed_thumb_chk)
         chk_row2.addStretch()
         root.addLayout(chk_row2)
+
+        # Cookie settings row (for Instagram private, Vimeo private, etc.)
+        cookie_row = QHBoxLayout()
+        self.cookies_browser_chk = QCheckBox("Use browser cookies")
+        self.cookies_browser_chk.setToolTip(
+            "Use cookies from your browser for platforms that require authentication "
+            "(Instagram, Vimeo private videos, etc.)"
+        )
+        self.cookies_browser_chk.setChecked(self.cookies_from_browser)
+        self.cookies_browser_chk.toggled.connect(self._on_cookies_toggled)
+        cookie_row.addWidget(self.cookies_browser_chk)
+        
+        self.cookie_path_btn = QPushButton("Cookie file...")
+        self.cookie_path_btn.setToolTip("Select a cookies.txt file from your browser")
+        self.cookie_path_btn.clicked.connect(self._browse_cookie_file)
+        cookie_row.addWidget(self.cookie_path_btn)
+        
+        self.cookie_path_label = QLabel(self.cookie_path[:40] + "..." if len(self.cookie_path) > 40 else self.cookie_path)
+        self.cookie_path_label.setStyleSheet("color: #666;" if not self.cookie_path else "")
+        cookie_row.addWidget(self.cookie_path_label)
+        cookie_row.addStretch()
+        root.addLayout(cookie_row)
 
         # Clean tags input (shown only when clean_chk is on)
         self.clean_tags_input = QLineEdit(", ".join(DEFAULT_CLEAN_TAGS))
@@ -1122,7 +1149,11 @@ class MainWindow(QWidget):
         height = RES_PRESETS[self.res_combo.currentIndex()][1]
         fmt = self.container_combo.currentText()
 
-        self._info_worker = FileSizeWorker(url, audio, height, fmt)
+        self._info_worker = FileSizeWorker(
+            url, audio, height, fmt,
+            cookie_path=self.cookie_path if self.cookie_path else None,
+            cookies_from_browser=self.cookies_from_browser
+        )
         self._info_worker.result.connect(self._on_info_result)
         self._info_worker.error.connect(self._on_info_error)
         self._info_worker.start()
@@ -1194,12 +1225,26 @@ class MainWindow(QWidget):
         if url in self.current_batch:
             return
         self.current_batch.append(url)
+        host = (urlparse(url).hostname or "").lower()
         if self._is_playlist_url(url):
-            pid = "?list=" + url.split("list=")[-1].split("&")[0][:11]
-            display = f"📋 {pid}"
+            # Extract identifier from list parameter (YouTube, Vimeo, etc.)
+            if "list=" in url:
+                identifier = url.split("list=")[-1].split("&")[0]
+                # YouTube playlist IDs are typically 11-34 chars, Vimeo/others vary
+                display = f"📋 {identifier[:20]}"
+            else:
+                display = f"📋 {url[:30]}"
         elif "v=" in url:
             vid = url.split("v=")[-1].split("&")[0]
             display = f"[{vid[:11]}]"
+        elif host in ("vimeo.com", "player.vimeo.com"):
+            # Vimeo URL: https://vimeo.com/123456789
+            vid = url.rstrip("/").split("/")[-1]
+            display = f"[{vid[:11]}]"
+        elif host in ("instagram.com", "www.instagram.com", "dailymotion.com", "www.dailymotion.com"):
+            # Instagram/Dailymotion: extract last path segment
+            vid = url.rstrip("/").split("/")[-1]
+            display = f"[{vid[:15]}]"
         else:
             display = url[:40]
         self.queue_list.addItem(QListWidgetItem(display))
@@ -1228,7 +1273,19 @@ class MainWindow(QWidget):
         host = (urlparse(url).hostname or "").lower()
         if not host:
             return False
-        return host == "youtu.be" or host == "youtube.com" or host.endswith(".youtube.com")
+        # YouTube family (youtube.com, youtu.be, music.youtube.com, etc.)
+        if host in ("youtu.be", "youtube.com") or host.endswith(".youtube.com"):
+            return True
+        # Vimeo (albums, showcases, channels can use list parameter)
+        if host in ("vimeo.com", "player.vimeo.com"):
+            return True
+        # Instagram (profile pages, multi-video posts may use list-like parameters)
+        if host in ("instagram.com", "www.instagram.com"):
+            return True
+        # Dailymotion playlists
+        if host in ("dailymotion.com", "www.dailymotion.com"):
+            return True
+        return False
 
     def _remove_selected(self) -> None:
         # Collect rows descending so each pop/takeItem doesn't shift remaining indices
@@ -1286,6 +1343,26 @@ class MainWindow(QWidget):
 
     def _on_clean_toggled(self, checked: bool) -> None:
         self.clean_tags_input.setEnabled(checked)
+
+    def _on_cookies_toggled(self, checked: bool) -> None:
+        self.cookies_from_browser = checked
+        self._settings.setValue("cookies_from_browser", checked)
+        self.cookie_path_label.setStyleSheet("color: #666;" if not self.cookie_path else "")
+
+    def _browse_cookie_file(self) -> None:
+        d, _ = QFileDialog.getOpenFileName(
+            self, "Select cookies.txt file",
+            str(Path.home()),
+            "Cookie files (*.txt);;All files (*)"
+        )
+        if d:
+            self.cookie_path = d
+            self._settings.setValue("cookie_path", d)
+            if len(d) > 40:
+                self.cookie_path_label.setText(d[:40] + "...")
+            else:
+                self.cookie_path_label.setText(d)
+            self.cookie_path_label.setStyleSheet("")
 
     # ------------------------------------------------------------------ #
     #  Downloader — download flow                                          #
@@ -1370,7 +1447,9 @@ class MainWindow(QWidget):
                 f"Inspecting {len(playlist_urls)} playlist URL(s)..."
             )
             self._inspect_worker = PlaylistInspectWorker(
-                playlist_urls, self.audio_only, PLAYLIST_CONFIRM_THRESHOLD
+                playlist_urls, self.audio_only, PLAYLIST_CONFIRM_THRESHOLD,
+                cookie_path=self.cookie_path if self.cookie_path else None,
+                cookies_from_browser=self.cookies_from_browser
             )
             self._inspect_worker.progress.connect(self.status_label.setText)
             self._inspect_worker.done.connect(self._on_inspect_done)
@@ -1428,6 +1507,8 @@ class MainWindow(QWidget):
             archive_path=getattr(self, "archive_path", None),
             embed_metadata=getattr(self, "embed_metadata", False),
             embed_thumbnail=getattr(self, "embed_thumbnail", False),
+            cookie_path=self.cookie_path if self.cookie_path else None,
+            cookies_from_browser=self.cookies_from_browser,
         )
         self.worker.progress.connect(self.dl_progress.setValue)
         self.worker.status.connect(self.status_label.setText)
