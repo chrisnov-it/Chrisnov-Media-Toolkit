@@ -2,7 +2,7 @@
 
 Minimal cross-platform media downloader and converter built with PySide6,
 `yt-dlp`, and FFmpeg. Lightweight enough for low-spec laptops (tested on Intel
-i5-5200U / 7GB RAM / Intel HD 5500).
+i5-5200U / 8GB RAM / Intel HD 5500).
 
 ## Features
 
