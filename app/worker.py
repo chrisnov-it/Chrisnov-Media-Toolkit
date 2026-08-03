@@ -126,19 +126,6 @@ class DownloadWorker(QThread):
             "no_warnings": True,
             "progress_hooks": [self._hook],
         }
-        # Add browser impersonation for platforms that require it (Dailymotion, Vimeo, Instagram, etc.)
-        # Try to use ImpersonateTarget for newer yt-dlp versions, fall back to string for older versions
-        try:
-            from yt_dlp.networking.impersonate import ImpersonateTarget
-            try:
-                # Try with a commonly available target
-                opts["impersonate"] = ImpersonateTarget.from_str("chrome")
-            except Exception:
-                # Fall back to string for older yt-dlp
-                opts["impersonate"] = "chrome"
-        except ImportError:
-            # Older yt-dlp without impersonate module
-            opts["impersonate"] = "chrome"
         if self.archive_path:
             opts["download_archive"] = self.archive_path
 
@@ -147,6 +134,23 @@ class DownloadWorker(QThread):
             opts["cookies_from_browser"] = ("chrome",)
         elif self.cookie_path and Path(self.cookie_path).exists():
             opts["cookies"] = self.cookie_path
+
+        # Add browser impersonation ONLY when cookies are being used
+        # (for Instagram private, Vimeo private, etc.) or for platforms known to block default yt-dlp UA
+        # YouTube works fine without impersonation; only Dailymotion/Vimeo/Instagram need it
+        needs_impersonation = (
+            self.cookies_from_browser or
+            (self.cookie_path and Path(self.cookie_path).exists())
+        )
+        if needs_impersonation:
+            try:
+                from yt_dlp.networking.impersonate import ImpersonateTarget
+                try:
+                    opts["impersonate"] = ImpersonateTarget.from_str("chrome")
+                except Exception:
+                    opts["impersonate"] = "chrome"
+            except ImportError:
+                opts["impersonate"] = "chrome"
 
         # Download the thumbnail file so EmbedThumbnail has something to embed.
         if self.embed_thumbnail and self._thumbnail_supported():
@@ -270,21 +274,28 @@ class PlaylistInspectWorker(QThread):
             "quiet": True, "no_warnings": True,
             "skip_download": True, "extract_flat": True,
         }
-        # Add browser impersonation
-        try:
-            from yt_dlp.networking.impersonate import ImpersonateTarget
-            try:
-                dry_opts["impersonate"] = ImpersonateTarget.from_str("chrome")
-            except Exception:
-                dry_opts["impersonate"] = "chrome"
-        except ImportError:
-            dry_opts["impersonate"] = "chrome"
-        
         # Add cookie support for playlist inspection
         if self.cookies_from_browser:
             dry_opts["cookies_from_browser"] = ("chrome",)
         elif self.cookie_path and Path(self.cookie_path).exists():
             dry_opts["cookies"] = self.cookie_path
+
+        # Add browser impersonation ONLY when cookies are being used
+        # (for Instagram private, Vimeo private, etc.) or for platforms known to block default yt-dlp UA
+        # YouTube works fine without impersonation; only Dailymotion/Vimeo/Instagram need it
+        needs_impersonation = (
+            self.cookies_from_browser or
+            (self.cookie_path and Path(self.cookie_path).exists())
+        )
+        if needs_impersonation:
+            try:
+                from yt_dlp.networking.impersonate import ImpersonateTarget
+                try:
+                    dry_opts["impersonate"] = ImpersonateTarget.from_str("chrome")
+                except Exception:
+                    dry_opts["impersonate"] = "chrome"
+            except ImportError:
+                dry_opts["impersonate"] = "chrome"
         
         total = len(self.playlist_urls)
         big: list[tuple[str, int, str, str]] = []
@@ -341,21 +352,28 @@ class FileSizeWorker(QThread):
                 "no_warnings": True,
                 "skip_download": True,
             }
-            # Add browser impersonation
-            try:
-                from yt_dlp.networking.impersonate import ImpersonateTarget
-                try:
-                    opts["impersonate"] = ImpersonateTarget.from_str("chrome")
-                except Exception:
-                    opts["impersonate"] = "chrome"
-            except ImportError:
-                opts["impersonate"] = "chrome"
-            
             # Add cookie support for metadata fetching
             if self.cookies_from_browser:
                 opts["cookies_from_browser"] = ("chrome",)
             elif self.cookie_path and Path(self.cookie_path).exists():
                 opts["cookies"] = self.cookie_path
+
+            # Add browser impersonation ONLY when cookies are being used
+            # (for Instagram private, Vimeo private, etc.) or for platforms known to block default yt-dlp UA
+            # YouTube works fine without impersonation; only Dailymotion/Vimeo/Instagram need it
+            needs_impersonation = (
+                self.cookies_from_browser or
+                (self.cookie_path and Path(self.cookie_path).exists())
+            )
+            if needs_impersonation:
+                try:
+                    from yt_dlp.networking.impersonate import ImpersonateTarget
+                    try:
+                        opts["impersonate"] = ImpersonateTarget.from_str("chrome")
+                    except Exception:
+                        opts["impersonate"] = "chrome"
+                except ImportError:
+                    opts["impersonate"] = "chrome"
             
             if self.audio_only:
                 opts["format"] = "ba/b"
