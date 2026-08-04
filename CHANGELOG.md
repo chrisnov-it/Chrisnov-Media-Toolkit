@@ -51,6 +51,18 @@ All notable changes to this project are documented here.
 
 ---
 
+## [0.2.0-beta.1] Re-release — 2026-08-04
+
+### Fixed
+
+- **YouTube downloads broken by unconditional browser impersonation**
+  Initial v0.2.0-beta.1 build applied `impersonate: chrome` to ALL URLs,
+  causing YouTube to throttle/block requests. Now impersonation is only
+  enabled when cookies are used (for authenticated content on Instagram,
+  Vimeo, Dailymotion). YouTube and other platforms work without it.
+
+---
+
 ## [0.1.0-beta.5] — 2026-07-23
 
 ### Added

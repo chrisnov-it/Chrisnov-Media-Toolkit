@@ -28,7 +28,7 @@ i5-5200U / 8GB RAM / Intel HD 5500).
   the whole list expands. Large playlists (>50 entries) ask for confirmation with a size
   estimate.
 - **Browser impersonation** — mimics Chrome browser to bypass anti-scraper protection
-  on platforms like Dailymotion, Vimeo, and Instagram
+  on platforms like Dailymotion, Vimeo, and Instagram. **Only enabled when cookies are used** (for authenticated content); YouTube and other platforms download without it.
 - **Cookie support** — download from private/age-restricted content by using browser
   cookies (auto-detect from Chrome) or loading a cookies.txt file
 - **Skip duplicates** — yt-dlp `download_archive` keeps a history file at
