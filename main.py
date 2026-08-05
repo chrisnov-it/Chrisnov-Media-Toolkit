@@ -36,6 +36,16 @@ def main() -> None:
     app.setApplicationName("Chrisnov Media Toolkit")
     app.setOrganizationName("Chrisnov IT Solutions")
 
+    # Global stylesheet — palette-aware so it works in both Light and Dark mode
+    _SS = """
+    * { font-size: 14px; }
+    QLabel, QLineEdit, QTextEdit, QComboBox, QPushButton, QListWidget,
+    QGroupBox, QTabWidget::pane, QRadioButton {
+        color: palette(windowText);
+    }
+    """
+    app.setStyleSheet(_SS)
+
     icon_path = Path(__file__).resolve().parent / "icon.svg"
     icon = None
     if icon_path.exists():
