@@ -38,6 +38,7 @@ scratch/
 test_opus.opus
 
 # Internal docs (not for public repo)
+CLAUDE.md
 AGENTS.md
 WALKTHROUGH.md
 ROADMAP.md
