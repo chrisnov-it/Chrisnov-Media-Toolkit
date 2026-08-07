@@ -1,10 +1,10 @@
 # Chrisnov Media Toolkit
 
-Minimal cross-platform **media downloader and converter** built with PySide6, yt-dlp, and FFmpeg. Paste a link from YouTube, Vimeo, Dailymotion, Instagram, TikTok, or 1000+ other sites and download or convert it — no Python needed to use the app. Lightweight enough for low-spec laptops (tested on Intel i5-5200U / 8GB RAM / Intel HD 5500).
+Minimal cross-platform **media downloader and converter** built with PySide6, yt-dlp, and FFmpeg. Paste a link from YouTube, Vimeo, Dailymotion, Instagram, TikTok, or 1000+ other sites and download or convert media. No Python is needed to use the app. Lightweight enough for low-spec laptops (tested on Intel i5-5200U / 8GB RAM / Intel HD 5500).
 
 **Requirements for the prebuilt app:** Windows 10/11 · macOS 12 (Monterey) or newer · Linux (Debian/Ubuntu-based). No Python or terminal required for end users.
 
-> **Bahasa Indonesia?** Lompat ke [Panduan Pengguna (Bahasa Indonesia)](#panduan-pengguna-bahasa-indonesia).
+> **Bahasa Indonesia?** The full user guide is in Indonesian on the blog: https://chrisnov.com/blog/chrisnov-media-toolkit
 
 ---
 
@@ -29,7 +29,7 @@ Go to the [Releases page](https://github.com/chrisnov-it/Chrisnov-Media-Toolkit/
 **Windows**
 1. Right-click the `.zip` → **Extract All…** → choose a folder → **Extract**.
 2. Open that folder and **double-click** the `.exe` inside.
-3. If Windows shows *“Windows protected your PC”*: click **More info** → **Run anyway**. This is normal for unsigned beta builds — the app is safe to use.
+3. If Windows shows *“Windows protected your PC”*: click **More info** → **Run anyway**. This is normal for unsigned beta builds. The app is safe to use.
 
 **macOS**
 1. Download the correct `.zip` for your Mac and double-click it to extract **Chrisnov Media Toolkit.app**.
@@ -44,9 +44,9 @@ Go to the [Releases page](https://github.com/chrisnov-it/Chrisnov-Media-Toolkit/
 
 ### 3. Your first download
 1. Open the app.
-2. Choose an **Output folder** (defaults are `~/Videos` for video, `~/Music` for audio — the app remembers your choice).
+2. Choose an **Output folder** (defaults are `~/Videos` for video or `~/Music` for audio. The app remembers your choice).
 3. Paste a video or playlist link into the box.
-4. Click **Start**. That’s it — progress and speed show at the bottom.
+4. Click **Start**. That’s it. Progress and speed show at the bottom.
 
 Want an explanation of every button? See [Using the app](#using-the-app) or the [Indonesian guide](#panduan-pengguna-bahasa-indonesia).
 
@@ -111,22 +111,22 @@ python3 -m venv .venv
 ## Using the app
 
 ### Downloader tab
-- **Start / URL box** — paste one or more links (one per line) and click **Start**. Progress shows as e.g. `[2/5] Downloading… 45% @ 2.3 MB/s`.
-- **Info** — shows the video title, duration, and an estimated output size *before* you download.
-- **Audio only** — downloads just the sound (no video). Choose `mp3`/`m4a`/`opus` and a **bitrate** (96–320 kbps). For music, 192 kbps is already very good.
-- **Resolution** — Best / 1080p / 720p / 480p / 360p.
-- **Container** — `mp4`/`mkv`/`webm` for video; `mp3`/`m4a`/`opus` for audio.
-- **Clean title** — strips tags like “Official Music Video”, “Video Lirik”, etc. from filenames. Add your own tags (comma-separated) in the box.
-- **Browse / Open** — choose the output folder / open it in your file manager.
-- **Embed metadata & thumbnail** — writes title/artist tags; can embed cover art (mp3, m4a, mp4, mkv). Thumbnail is off by default.
-- **Use browser cookies / Cookie file…** — for private or age-restricted content (Instagram private, Vimeo limited). See FAQ.
-- **Skip duplicates** — defaults on: skips things you already downloaded (great for resuming a stopped batch).
-- **Playlists** — paste a playlist URL (YouTube/Vimeo/Dailymotion); large playlists (>50 entries) ask for confirmation with a size estimate.
-- **Batch queue** — add many URLs and download them one after another; cancel mid-batch anytime.
-- **History** — search/filter past downloads by name or URL, and by type. Double-click a ✅ to open the folder, or a ❌ to re-download.
+- **Start / URL box**: paste one or more links (one per line) and click **Start**. Progress shows as e.g. `[2/5] Downloading… 45% @ 2.3 MB/s`.
+- **Info**: shows the video title, duration, and an estimated output size *before* you download.
+- **Audio only**: downloads just the sound (no video). Choose `mp3`/`m4a`/`opus` and a **bitrate** (96–320 kbps). For music, 192 kbps is already very good.
+- **Resolution**: Best / 1080p / 720p / 480p / 360p.
+- **Container**: `mp4`/`mkv`/`webm` for video; `mp3`/`m4a`/`opus` for audio.
+- **Clean title**: strips tags like “Official Music Video”, “Video Lirik”, etc. from filenames. Add your own tags (comma-separated) in the box.
+- **Browse / Open**: choose the output folder / open it in your file manager.
+- **Embed metadata & thumbnail**: writes title/artist tags; can embed cover art (mp3, m4a, mp4, mkv). Thumbnail is off by default.
+- **Use browser cookies / Cookie file…**: for private or age-restricted content (Instagram private, Vimeo limited). See FAQ.
+- **Skip duplicates**: defaults on, skips things you already downloaded (great for resuming a stopped batch).
+- **Playlists**: paste a playlist URL (YouTube/Vimeo/Dailymotion); large playlists (>50 entries) ask for confirmation with a size estimate.
+- **Batch queue**: add many URLs and download them one after another; cancel mid-batch anytime.
+- **History**: search/filter past downloads by name or URL, and by type. Double-click a ✅ to open the folder, or a ❌ to re-download.
 
 ### Audio Converter tab
-Convert local audio files — or pull the audio out of local videos — to **mp3, m4a, opus, flac, or wav**. Options: bitrate, sample rate, loudness normalization (EBU R128), trim silence, and **Add folder…** to batch a whole album.
+Convert local audio files, or pull the audio out of local videos, to **mp3, m4a, opus, flac, or wav**. Options: bitrate, sample rate, loudness normalization (EBU R128), trim silence, and **Add folder…** to batch a whole album.
 
 ### Video Converter tab
 Convert local videos to **mp4, mkv, or webm**. Quality presets: **Keep quality / Balanced / Smaller file**. “Keep original audio when possible” keeps your existing audio track when the container supports it.
@@ -143,7 +143,7 @@ The app remembers the last output folder you chose for each mode. The defaults a
 
 **Q: I click Start but nothing happens.**
 - Make sure the URL box is not empty and the link starts with `http://` or `https://`.
-- Read the message in the status bar at the bottom of the window — it usually explains the error.
+- Read the message in the status bar at the bottom of the window. It usually explains the error.
 
 **Q: Downloaded video has audio but no picture (or vice‑versa).**
 - Almost always FFmpeg is missing. Linux: `sudo apt install ffmpeg`. Windows: `winget install Gyan.FFmpeg` then restart the app.
@@ -196,7 +196,7 @@ MIT License. See [LICENSE](LICENSE) for details.
 
 ## Panduan Pengguna (Bahasa Indonesia)
 
-Panduan lengkap dalam Bahasa Indonesia — termasuk cara pakai, pengaturan, dan FAQ — tersedia di [blog kami](https://chrisnov.com/blog/chrisnov-media-toolkit).
+Panduan lengkap dalam Bahasa Indonesia tersedia di [blog kami](https://chrisnov.com/blog/chrisnov-media-toolkit), termasuk cara pakai, pengaturan, dan FAQ.
 
 ### Tips Cepat
 
@@ -204,11 +204,11 @@ Panduan lengkap dalam Bahasa Indonesia — termasuk cara pakai, pengaturan, dan 
 |---|---|
 | Unduh musik dari YouTube | Centang **Audio only**, pilih format mp3/m4a, klik Start |
 | Unduh beberapa video sekaligus | Tambahkan satu per satu ke antrian, baru klik Start |
-| Unduh seluruh playlist | Tempel link playlist langsung — semua episode otomatis masuk antrian |
+| Unduh seluruh playlist | Tempel link playlist langsung, semua episode otomatis masuk antrian |
 | Hapus tag "(Official Music Video)" dari nama file | Pastikan **Clean title** dicentang |
 | Unduh dari Dailymotion/Instagram/Vimeo | Sudah didukung! Pastikan `curl_cffi` terinstall |
 | Unduh konten private (Instagram/Vimeo) | Centang **Use browser cookies** atau pilih cookie file |
-| Lanjutkan unduhan yang sempat dibatalkan | Klik Start lagi — yang sudah diunduh otomatis dilewati |
+| Lanjutkan unduhan yang sempat dibatalkan | Klik Start lagi, yang sudah diunduh otomatis dilewati |
 | Lihat riwayat unduhan | Buka tab **History**, cari/filter berdasarkan nama atau tipe file |
 | Buka folder file yang pernah diunduh | Tab **History**, double-click item yang statusnya ✅ |
 | Download ulang file yang gagal | Tab **History**, double-click item yang statusnya ❌ |
