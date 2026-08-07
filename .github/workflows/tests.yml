@@ -30,7 +30,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y ffmpeg
           python -m pip install --upgrade pip
-          pip install PySide6 pytest
+          pip install PySide6 yt-dlp curl_cffi pytest
 
       - name: Run pytest
         run: pytest -v
