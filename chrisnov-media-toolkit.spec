@@ -105,5 +105,9 @@ if is_macos:
             'CFBundleShortVersionString': os.environ.get('APP_VERSION', '0.2.0-beta.2'),
             'CFBundleVersion': os.environ.get('APP_BUILD_NUMBER', '1'),
             'NSHighResolutionCapable': True,
+            # Advertise the minimum macOS we build for (must stay in sync with
+            # MACOSX_DEPLOYMENT_TARGET in the CI workflow), so macOS refuses the
+            # app with a clear message instead of silently failing to launch.
+            'LSMinimumSystemVersion': os.environ.get('MACOSX_DEPLOYMENT_TARGET', '12.0'),
         },
     )
