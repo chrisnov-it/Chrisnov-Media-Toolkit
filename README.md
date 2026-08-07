@@ -1,107 +1,70 @@
 # Chrisnov Media Toolkit
 
-Minimal cross-platform media downloader and converter built with PySide6,
-`yt-dlp`, and FFmpeg. Lightweight enough for low-spec laptops (tested on Intel
-i5-5200U / 8GB RAM / Intel HD 5500).
+Minimal cross-platform **media downloader and converter** built with PySide6, yt-dlp, and FFmpeg. Paste a link from YouTube, Vimeo, Dailymotion, Instagram, TikTok, or 1000+ other sites and download or convert it — no Python needed to use the app. Lightweight enough for low-spec laptops (tested on Intel i5-5200U / 8GB RAM / Intel HD 5500).
 
-## Features
+**Requirements for the prebuilt app:** Windows 10/11 · macOS 12 (Monterey) or newer · Linux (Debian/Ubuntu-based). No Python or terminal required for end users.
 
-- Paste any yt-dlp-supported URL (YouTube, Vimeo, Dailymotion, Instagram, TikTok, and 1000+ sites)
-- **Audio-only mode** — extracts soundtrack with selectable bitrate (96/128/160/192/256/320 kbps)
-- **Remembers last folder** — the output folder you picked for each mode
-  (video download, audio download, audio convert, video convert) is saved and
-  restored the next time you open the app. No more falling back to defaults
-  every launch.
-- **Open Folder button** — opens the currently selected output directory in
-  your system file manager, on all three tabs.
-- **Pre-download info** — the **Info** button shows the video title, duration,
-  and an estimated output size before you start downloading.
-- **Embed metadata & thumbnail** — writes title/artist tags into the file
-  (on by default) and can embed the cover thumbnail (off by default). Thumbnail
-  embedding is available for mp3, m4a, mp4, and mkv.
-- **Title cleanup** — strips "Official Music Video", "Video Lirik", etc. from filenames
-  (editable tag list in GUI; includes common Indonesian tags out of the box)
-- Resolution presets: Best / 1080p / 720p / 480p / 360p
-- Container choice: mp4 / mkv / webm (video) or mp3 / m4a / opus (audio)
-- **Batch queue** — add many URLs, removes the need to babysit each download
-- **Playlist support** — paste a playlist URL from YouTube, Vimeo, or Dailymotion and
-  the whole list expands. Large playlists (>50 entries) ask for confirmation with a size
-  estimate.
-- **Browser impersonation** — mimics Chrome browser to bypass anti-scraper protection
-  on platforms like Dailymotion, Vimeo, and Instagram. **Only enabled when cookies are used** (for authenticated content); YouTube and other platforms download without it.
-- **Cookie support** — download from private/age-restricted content by using browser
-  cookies (auto-detect from Chrome) or loading a cookies.txt file
-- **Skip duplicates** — yt-dlp `download_archive` keeps a history file at
-  `~/.config/chrisnov-media-toolkit/archive_*.txt` (separate for audio vs video).
-  Anything re-queued gets skipped automatically.
-- **Drag-and-drop** — drop a URL, text, or a text file of URLs onto the window
-- **Download History** — automatically records all downloads (success/failed) with
-  filename, size, timestamp, and status. Search by filename or URL, filter by type
-  (audio/video/playlist). Double-click to open folder (if file exists) or re-download
-  (if failed). History limited to 1,000 most recent entries to keep storage lightweight.
-  Stored at `~/.config/chrisnov-media-toolkit/download-history.json`.
-- Pick output folder (defaults to `~/Videos` or `~/Music` on first run)
-- Live progress + speed (per item, e.g. "[2/5] Downloading...")
-- Cancel mid-batch
-- Queue clears automatically after each batch finishes
-- **Audio converter** — batch convert local audio/video files to mp3, m4a,
-  opus, flac, or wav
-- **Video converter** — batch convert local videos to mp4, mkv, or webm with
-  simple quality presets
-- **Add folder** — add supported media from a folder tree for batch conversion
+> **Bahasa Indonesia?** Lompat ke [Panduan Pengguna (Bahasa Indonesia)](#panduan-pengguna-bahasa-indonesia).
 
-## Building a standalone executable
+---
 
-Produces a single self-contained binary — no Python installation required for end-users.
+## 🚀 Quick Start (no technical knowledge needed)
 
-> **Cross-compile limitation:** PyInstaller must run on the **target OS**.
-> Build the Linux binary on Linux, and the Windows `.exe` on Windows.
-> If you dual-boot, run the matching script on each OS.
+No terminal, no Python. You only need to download the right file and double-click it.
 
-### Linux (single-file binary)
+### 1. Get the app
 
+Go to the [Releases page](https://github.com/chrisnov-it/Chrisnov-Media-Toolkit/releases) and download the file for your computer:
+
+| Your computer | Download this | Notes |
+|---|---|---|
+| Windows (most PCs) | `...-windows-x64-lite.zip` | |
+| Windows (no FFmpeg installed) | `...-windows-x64-bundled.zip` | Bigger, but FFmpeg is included |
+| Mac with Apple chip (M1/M2/M3...) | `...-macos-arm64-lite.zip` | |
+| Mac with Intel chip | `...-macos-x86_64-lite.zip` | e.g. older MacBooks |
+| Linux | `...-linux-x64-lite.tar.gz` | |
+
+### 2. Install and open the app
+
+**Windows**
+1. Right-click the `.zip` → **Extract All…** → choose a folder → **Extract**.
+2. Open that folder and **double-click** the `.exe` inside.
+3. If Windows shows *“Windows protected your PC”*: click **More info** → **Run anyway**. This is normal for unsigned beta builds — the app is safe to use.
+
+**macOS**
+1. Download the correct `.zip` for your Mac and double-click it to extract **Chrisnov Media Toolkit.app**.
+2. If macOS says the app *“cannot be opened”*: **right-click** the app → **Open** → **Open** again. Normal for unsigned builds.
+
+**Linux**
+1. Extract the `.tar.gz`, then make the file runnable:
+   ```bash
+   chmod +x chrisnov-media-toolkit-lite
+   ```
+2. Double-click **chrisnov-media-toolkit-lite** (or run it from a terminal).
+
+### 3. Your first download
+1. Open the app.
+2. Choose an **Output folder** (defaults are `~/Videos` for video, `~/Music` for audio — the app remembers your choice).
+3. Paste a video or playlist link into the box.
+4. Click **Start**. That’s it — progress and speed show at the bottom.
+
+Want an explanation of every button? See [Using the app](#using-the-app) or the [Indonesian guide](#panduan-pengguna-bahasa-indonesia).
+
+---
+
+## 💻 For users comfortable with the terminal (run from source)
+
+If you’d rather run the app from source (development, custom builds, or the latest code), you’ll set this up once. You need a little familiarity with your terminal.
+
+### What you need
+- **Python 3.12**
+- **FFmpeg** (needed for downloads that remux and for all conversions)
+- **Git** (to clone the repository)
+
+### Linux (Debian / Ubuntu / Pop!_OS / Linux Mint)
 ```bash
-bash build-linux.sh
-# Output: dist/chrisnov-media-toolkit
-```
+sudo apt install ffmpeg python3-venv git
 
-### Windows (packaged as .zip)
-
-```powershell
-# In PowerShell from the project root:
-Set-ExecutionPolicy -Scope Process Bypass
-.\build-windows.ps1
-# Outputs: dist\chrisnov-media-toolkit-vX.Y.Z-windows-x64-lite.zip
-#          dist\chrisnov-media-toolkit-vX.Y.Z-windows-x64-bundled.zip
-```
-
-Each `.zip` contains the standalone `.exe`. Extract the zip, then
-double-click the `.exe` inside. For SmartScreen warnings, see the blog post
-or docs: this is expected for unsigned beta builds.
-
-For a custom Windows executable icon, place `icon.ico` in the
-project root before building. Without it, the `.exe` builds with the default
-Windows application icon; the in-app window icon still uses `icon.svg`.
-
-> **Note on file size:** The binary bundles Python, PySide6, and yt-dlp.
-> ~50-90 MB is normal depending on OS and dependency versions. The build scripts
-> currently avoid requiring UPX because packed executables can trigger antivirus
-> false positives more often than unpacked PyInstaller builds.
-
-### macOS (prebuilt zip)
-
-Prebuilt `.zip` releases are produced by `.github/workflows/build-macos.yml`
-and attached to GitHub Releases for both Apple Silicon
-(`-macos-arm64-lite.zip`) and Intel (`-macos-x86_64-lite.zip`).
-See [`docs/OLD-MAC-WORKAROUND.md`](docs/OLD-MAC-WORKAROUND.md) for
-Intel-Mac instructions and SHA256 verification.
-
-## Setup
-
-### Linux Mint (and other Debian/Ubuntu)
-
-```bash
-sudo apt install ffmpeg python3-venv
 git clone https://github.com/chrisnov-it/Chrisnov-Media-Toolkit.git
 cd Chrisnov-Media-Toolkit
 python3 -m venv .venv
@@ -110,12 +73,12 @@ python3 -m venv .venv
 .venv/bin/python main.py
 ```
 
-### Windows 11
-
+### Windows 11 (PowerShell)
 ```powershell
-# Install ffmpeg first (winget or choco), e.g.:
+# Install FFmpeg once (choose one):
 winget install Gyan.FFmpeg
 
+# Then clone and run:
 git clone https://github.com/chrisnov-it/Chrisnov-Media-Toolkit.git
 cd Chrisnov-Media-Toolkit
 py -m venv .venv
@@ -124,12 +87,135 @@ py -m venv .venv
 .venv\Scripts\python main.py
 ```
 
-## Project layout
+### macOS (from source)
+```bash
+# Install Homebrew first (https://brew.sh), then:
+brew install ffmpeg python@3.12
 
+git clone https://github.com/chrisnov-it/Chrisnov-Media-Toolkit.git
+cd Chrisnov-Media-Toolkit
+python3 -m venv .venv
+.venv/bin/pip install -U pip
+.venv/bin/pip install PySide6 yt-dlp curl_cffi
+.venv/bin/python main.py
+```
+
+### Keep yt-dlp updated (all OSes, inside the virtual env)
+```bash
+.venv/bin/pip install -U yt-dlp curl_cffi
+```
+(O n Windows: `.venv\Scripts\pip install -U yt-dlp curl_cffi`)
+
+---
+
+## Using the app
+
+### Downloader tab
+- **Start / URL box** — paste one or more links (one per line) and click **Start**. Progress shows as e.g. `[2/5] Downloading… 45% @ 2.3 MB/s`.
+- **Info** — shows the video title, duration, and an estimated output size *before* you download.
+- **Audio only** — downloads just the sound (no video). Choose `mp3`/`m4a`/`opus` and a **bitrate** (96–320 kbps). For music, 192 kbps is already very good.
+- **Resolution** — Best / 1080p / 720p / 480p / 360p.
+- **Container** — `mp4`/`mkv`/`webm` for video; `mp3`/`m4a`/`opus` for audio.
+- **Clean title** — strips tags like “Official Music Video”, “Video Lirik”, etc. from filenames. Add your own tags (comma-separated) in the box.
+- **Browse / Open** — choose the output folder / open it in your file manager.
+- **Embed metadata & thumbnail** — writes title/artist tags; can embed cover art (mp3, m4a, mp4, mkv). Thumbnail is off by default.
+- **Use browser cookies / Cookie file…** — for private or age-restricted content (Instagram private, Vimeo limited). See FAQ.
+- **Skip duplicates** — defaults on: skips things you already downloaded (great for resuming a stopped batch).
+- **Playlists** — paste a playlist URL (YouTube/Vimeo/Dailymotion); large playlists (>50 entries) ask for confirmation with a size estimate.
+- **Batch queue** — add many URLs and download them one after another; cancel mid-batch anytime.
+- **History** — search/filter past downloads by name or URL, and by type. Double-click a ✅ to open the folder, or a ❌ to re-download.
+
+### Audio Converter tab
+Convert local audio files — or pull the audio out of local videos — to **mp3, m4a, opus, flac, or wav**. Options: bitrate, sample rate, loudness normalization (EBU R128), trim silence, and **Add folder…** to batch a whole album.
+
+### Video Converter tab
+Convert local videos to **mp4, mkv, or webm**. Quality presets: **Keep quality / Balanced / Smaller file**. “Keep original audio when possible” keeps your existing audio track when the container supports it.
+
+### Drag & drop
+Drop a URL, some text, or a `.txt` file of URLs (one per line) onto the window to add them to the queue. Lines starting with `#` are ignored.
+
+### Where files are saved
+The app remembers the last output folder you chose for each mode. The defaults are `~/Videos` (video) and `~/Music` (audio). Click **Open** next to **Browse** to jump straight to that folder.
+
+---
+
+## FAQ / Troubleshooting
+
+**Q: I click Start but nothing happens.**
+- Make sure the URL box is not empty and the link starts with `http://` or `https://`.
+- Read the message in the status bar at the bottom of the window — it usually explains the error.
+
+**Q: Downloaded video has audio but no picture (or vice‑versa).**
+- Almost always FFmpeg is missing. Linux: `sudo apt install ffmpeg`. Windows: `winget install Gyan.FFmpeg` then restart the app.
+- Re‑download the same item (Skip duplicates allows overwriting if the archive file is removed).
+
+**Q: Filenames still have “(Official Music Video)” or other tags.**
+- Make sure **Clean title** is checked.
+- If your tag isn’t in the default list, type it in the text box (comma-separated).
+
+**Q: I cancelled mid‑batch. How do I continue without re‑downloading?**
+- Click **Start** again. **Skip duplicates** skips files already in the archive.
+- To re‑download from scratch, delete the archive file:
+  ```bash
+  rm ~/.config/chrisnov-media-toolkit/archive_audio.txt   # or archive_video.txt
+  ```
+
+**Q: Where are my downloads saved?**
+- In the output folder you chose (defaults: `~/Videos` for video, `~/Music` for audio). The app remembers your last folder per mode. Click **Open** to see it.
+
+**Q: Dailymotion / Vimeo / Instagram fail to download.**
+- These sites block default requests; the app handles them via browser impersonation (enabled automatically when cookies are used).
+- For private/authenticated content: check **Use browser cookies**, or click **Cookie file…** and pick a `cookies.txt` exported from your browser.
+- Running from source? Ensure `curl_cffi` is installed: `pip install curl_cffi`.
+
+**Q: How do I get a cookies.txt file from my browser?**
+- **Chrome/Edge:** install the *“Get cookies.txt”* extension, open the page you want, click the extension and save.
+- **Firefox:** use the *“Cookie-Editor”* extension and export as cookies.txt.
+- Files from Brave/Opera etc. usually work too.
+
+**Q: Is site X supported?**
+- Check the full list: `yt-dlp --list-extractors`. If it’s supported by yt-dlp, this app supports it. Some sites need impersonation (already built‑in) and/or cookies.
+
+**Q: Does the app send my data anywhere?**
+- No. Everything runs locally on your computer. yt-dlp only talks to YouTube/CDN like a browser does when playing a video.
+
+**Q: Unsigned/“recognized developer” warnings on macOS?**
+- Expected for beta builds without a paid code‑signing certificate. Right‑click → **Open** to run; the app is safe.
+
+---
+
+## 🔧 For developers / building a standalone executable
+
+Produces a single self-contained binary — end users don’t need Python.
+
+> **Cross‑compile limitation:** PyInstaller must run on the **target OS**. Build the Linux binary on Linux, and the Windows `.exe` on Windows. If you dual‑boot, run the matching script on each OS.
+
+### Linux
+```bash
+bash build-linux.sh
+# Output: dist/chrisnov-media-toolkit
+```
+
+### Windows
+```powershell
+# In PowerShell from the project root:
+Set-ExecutionPolicy -Scope Process Bypass
+.\build-windows.ps1
+# Outputs: dist\chrisnov-media-toolkit-vX.Y.Z-windows-x64-lite.zip
+#          dist\chrisnov-media-toolkit-vX.Y.Z-windows-x64-bundled.zip
+```
+Each `.zip` contains the standalone `.exe`. For a custom Windows icon, place `icon.ico` in the project root before building; without it the `.exe` uses the default icon (the in‑app window still uses `icon.svg`).
+
+### macOS
+Prebuilt `.zip`s are produced by `.github/workflows/build-macos.yml` and attached to GitHub Releases for both Apple Silicon (`-macos-arm64-lite.zip`) and Intel (`-macos-x86_64-lite.zip`). The CI pins a macOS deployment target of 12.0 so Intel builds run on older Macs (e.g. 2015 MacBook Air). See `docs/OLD-MAC-WORKAROUND.md` for Intel‑Mac specifics and SHA256 verification.
+
+> **File size:** ~50–90 MB is normal — it bundles Python, PySide6, and yt-dlp. UPX is avoided because packed executables can trigger antivirus false positives.
+
+### Project layout
 ```
 Chrisnov-Media-Toolkit/
-├── main.py              # entry point
-├── icon.svg             # app icon (SVG)
+├── main.py               # entry point
+├── icon.svg              # app icon (SVG)
 ├── app/
 │   ├── constants.py      # APP_VERSION, presets, container lists, thresholds
 │   ├── cleaner.py        # clean_title, rename_with_cleanup, discover_new_files
@@ -140,71 +226,23 @@ Chrisnov-Media-Toolkit/
 │   ├── converter_worker.py # ConvertWorker, VideoConvertWorker (FFmpeg-based)
 │   ├── window.py         # MainWindow (GUI)
 │   └── icon.py           # load_svg_icon helper
-└── .venv/               # Python venv with PySide6 + yt-dlp
+└── .venv/                # Python venv with PySide6 + yt-dlp
 ```
 
 ### Shared utilities (extracted to reduce duplication)
+- **`base_worker.py`** — `CancellableWorker` provides the `_cancelled` flag, `cancel()`, and `cancelled` property. All 5 worker classes inherit from it; converter workers override `cancel()` to also terminate their FFmpeg subprocess.
+- **`yt_dlp_opts.py`** — centralizes yt-dlp options: `build_cookie_opts()` (cookie + impersonation), `build_format_opts()` (format/outtmpl/postprocessors), `build_dry_opts()` (metadata‑only), `_thumbnail_supported()` / `_extra_postprocessors()`.
+- **`ffmpeg_utils.py`** — centralizes FFmpeg ops: `find_ffmpeg()`/`find_ffprobe()` (PyInstaller → local → PATH), `probe_duration()`/`probe_loudness()`, `resolve_output_path()`, `run_ffmpeg_with_progress()` (progress parsing, cancellation, range mapping).
 
-- **`base_worker.py`** — `CancellableWorker` provides the `_cancelled` flag,
-  `cancel()` method, and `cancelled` property. All 5 worker classes
-  (`DownloadWorker`, `PlaylistInspectWorker`, `FileSizeWorker`,
-  `ConvertWorker`, `VideoConvertWorker`) inherit from it. Converter workers
-  override `cancel()` to also terminate their FFmpeg subprocess.
+### Architecture
+GUI runs in the main thread; downloads happen in `DownloadWorker` (a `QThread`) so the UI stays responsive. The worker uses yt-dlp’s Python API directly (`YoutubeDL.extract_info(download=True)`), passing `download_archive` for de‑duplication, `progress_hooks` for live status, `impersonate` for browser mimicry, and cookie options for authenticated content. After each download, `MainWindow._on_item_ok` applies title cleanup on disk. Local conversion uses FFmpeg via `ConvertWorker`/`VideoConvertWorker`, which parse `ffmpeg -progress` for live progress and terminate the FFmpeg subprocess on Cancel. Playlists >50 entries trigger a dry `extract_info` count and a confirmation dialog.
 
-- **`yt_dlp_opts.py`** — Centralizes yt-dlp option construction:
-  - `build_cookie_opts()` — cookie + browser impersonation (was duplicated 3×)
-  - `build_format_opts()` — download format/outtmpl/postprocessors (was inline in `_build_opts()`)
-  - `build_dry_opts()` — metadata-only extraction opts (was inline in `FileSizeWorker.run()`)
-  - `_thumbnail_supported()` / `_extra_postprocessors()` — thumbnail embedding
-    gate + postprocessor list (was inline in `DownloadWorker`)
-
-- **`ffmpeg_utils.py`** — Centralizes FFmpeg operations:
-  - `find_ffmpeg()` / `find_ffprobe()` — binary discovery (3-tier: PyInstaller → local → PATH)
-  - `probe_duration()` / `probe_loudness()` — media probing
-  - `resolve_output_path()` — collision-aware output path building
-  - `run_ffmpeg_with_progress()` — generic ffmpeg execution with `-progress`
-    parsing, cancellation support, and progress range mapping
-
-
-## Architecture
-
-GUI runs in the main thread; downloads happen in `DownloadWorker` (`QThread`)
-so the UI stays responsive. The worker uses yt-dlp's Python API directly
-(`YoutubeDL.extract_info(download=True)`), passing `download_archive` for
-de-duplication, `progress_hooks` for live status, `impersonate` for browser
-mimicry, and optional `cookies`/`cookies_from_browser` for authenticated content.
-
-After each download completes, `MainWindow._on_item_ok` calls
-`rename_with_cleanup` (single file) or `discover_new_files` + loop
-(playlist batch) to apply user-configured title cleanup on disk.
-
-For audio-only downloads, `yt-dlp` first saves the raw stream (e.g. `.webm`),
-then `FFmpegExtractAudio` converts it to the chosen container (`.mp3`, `.m4a`,
-`.opus`). The worker corrects the path extension before passing it to the
-rename step so cleanup always targets the actual file on disk.
-
-Playlist mode is auto-detected for YouTube, Vimeo, Instagram, and Dailymotion
-via `list=` parameter or platform-specific detection. Before kicking off any
-playlist >50 entries, `_confirm_playlists` does a dry `extract_info` to count
-and asks for confirmation with a size estimate.
-
-Local audio/video conversion uses FFmpeg through `ConvertWorker` and
-`VideoConvertWorker`. The workers parse `ffmpeg -progress` output for live
-progress updates and terminate the FFmpeg subprocess when Cancel is clicked.
-
-## Notes
-
-- Skip-duplicates archive lives at `~/.config/chrisnov-media-toolkit/archive_audio.txt`
-  (or `archive_video.txt`). Delete these files to re-download from scratch.
-- No GPU mode change needed. Intel Power Saving is fine for this GUI.
-- yt-dlp is bundled via the venv, so a system yt-dlp install is optional.
-- **curl_cffi required** for browser impersonation: `pip install curl_cffi`
-- To update yt-dlp later: `.venv/bin/pip install -U yt-dlp curl_cffi`
-- App icon: `icon.svg` (auto-loaded from project root). To customise, replace that file
-  with any valid SVG.
-- On Windows 11 the taskbar gets the same icon automatically (via AppUserModelID).
-- Cookie files are stored at the path you select; browser cookies are auto-detected
-  from Chrome's default profile location.
+### Notes
+- Skip‑duplicates archive: `~/.config/chrisnov-media-toolkit/archive_audio.txt` (or `archive_video.txt`). Delete these to re‑download from scratch.
+- Download history: `~/.config/chrisnov-media-toolkit/download-history.json` (capped at 1,000 entries).
+- `curl_cffi` is required for browser impersonation: `pip install curl_cffi`.
+- yt-dlp is bundled via the venv; a system yt-dlp isn’t required.
+- App icon: `icon.svg` in the project root (any valid SVG). On Windows 11 the taskbar uses it automatically.
 
 ## License
 
@@ -212,7 +250,7 @@ MIT License. See [LICENSE](LICENSE) for details.
 
 ---
 
-## Panduan Pengguna (Non-Technical)
+## Panduan Pengguna (Bahasa Indonesia)
 
 > Panduan ini ditujukan untuk pengguna yang belum terbiasa dengan aplikasi download.
 > Tidak perlu install Python atau membuka terminal — ikuti langkah di bawah saja.
@@ -304,9 +342,7 @@ berdasarkan tipe (Audio/Video/Playlist). Double-click item yang ✅ untuk buka
 folder, atau ❌ untuk download ulang. Riwayat dibatasi 1.000 entri terbaru agar
 tidak memakan storage berlebihan.
 
----
-
-## FAQ / Troubleshooting
+### FAQ / Troubleshooting
 
 **Q: Saya klik Start tapi tidak ada yang terjadi.**
 - Pastikan kolom URL sudah terisi dan diawali dengan `http://` atau `https://`.
