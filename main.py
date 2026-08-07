@@ -19,6 +19,7 @@ if bin_dir.exists():
 
 from PySide6.QtWidgets import QApplication
 
+from app.theme import global_stylesheet, enable_high_dpi
 from app.window import MainWindow
 from app.icon import load_svg_icon
 
@@ -32,19 +33,18 @@ def main() -> None:
         except Exception:
             pass
 
+    # Enable HiDPI scaling BEFORE QApplication is created — critical for
+    # readable fonts on macOS (especially MacBook Air 2015 where 9pt is
+    # too small without proper DPI scaling).
+    enable_high_dpi()
+
     app = QApplication(sys.argv)
     app.setApplicationName("Chrisnov Media Toolkit")
     app.setOrganizationName("Chrisnov IT Solutions")
 
-    # Global stylesheet — palette-aware so it works in both Light and Dark mode
-    _SS = """
-    * { font-size: 14px; }
-    QLabel, QLineEdit, QTextEdit, QComboBox, QPushButton, QListWidget,
-    QGroupBox, QTabWidget::pane, QRadioButton {
-        color: palette(windowText);
-    }
-    """
-    app.setStyleSheet(_SS)
+    # Global stylesheet — palette-aware (adapts to Light/Dark Mode) with
+    # platform-adjusted font sizes (11pt on macOS, 9pt on Linux/Windows).
+    app.setStyleSheet(global_stylesheet())
 
     icon_path = Path(__file__).resolve().parent / "icon.svg"
     icon = None

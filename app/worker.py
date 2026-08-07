@@ -5,9 +5,16 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from PySide6.QtCore import QThread, Signal
+from PySide6.QtCore import Signal
 from yt_dlp import YoutubeDL
 
+from .base_worker import CancellableWorker
+from .yt_dlp_opts import (
+    build_cookie_opts,
+    build_dry_opts,
+    build_format_opts,
+    _thumbnail_supported,
+)
 from .constants import VIDEO_CONTAINERS, AUDIO_CONTAINERS
 
 
@@ -15,7 +22,7 @@ class _CancelledError(Exception):
     """Raised from the yt-dlp progress hook to abort a download cleanly."""
 
 
-class DownloadWorker(QThread):
+class DownloadWorker(CancellableWorker):
     progress = Signal(int)        # 0-100
     status = Signal(str)          # status message
     finished_ok = Signal(str)     # final saved path (or "playlist:N:title")
@@ -42,12 +49,6 @@ class DownloadWorker(QThread):
         self.embed_thumbnail = embed_thumbnail
         self.cookie_path = cookie_path
         self.cookies_from_browser = cookies_from_browser
-        self._cancelled = False
-
-    def cancel(self) -> None:
-        """Request cancellation. The progress hook will raise on the next
-        yt-dlp callback, aborting the download without killing the thread."""
-        self._cancelled = True
 
     def run(self) -> None:
         try:
@@ -94,96 +95,27 @@ class DownloadWorker(QThread):
             self.progress.emit(100)
             self.status.emit(f"{self.idx_label} Merging/post-processing...")
 
-    def _thumbnail_supported(self) -> bool:
-        """Return True if the target container reliably supports embedded cover art."""
-        if self.audio_only:
-            return self.container in {"mp3", "m4a"}
-        return self.container in {"mp4", "mkv"}
-
-    def _extra_postprocessors(self) -> list[dict]:
-        """Build metadata/thumbnail postprocessors shared by audio and video paths.
-
-        Order matters: FFmpegMetadata must run before EmbedThumbnail so the
-        cover art survives the metadata rewrite.
-        """
-        pps: list[dict] = []
-        if self.embed_metadata:
-            # FFmpegMetadata already prefers YouTube's music fields when present:
-            # it maps %(track)s -> title and %(artist)s -> artist automatically,
-            # falling back to the raw video title only when no music metadata
-            # exists. We deliberately avoid MetadataParser/INTERPRET here because
-            # it overwrites the infodict title with "NA" when %(track)s is empty,
-            # which corrupts both the output filename and the title tag.
-            pps.append({"key": "FFmpegMetadata", "add_metadata": True})
-        if self.embed_thumbnail and self._thumbnail_supported():
-            pps.append({"key": "EmbedThumbnail", "already_have_thumbnail": False})
-        return pps
-
     def _build_opts(self) -> dict:
-        opts: dict = {
-            "noplaylist": not self.playlist,
-            "quiet": True,
-            "no_warnings": True,
-            "progress_hooks": [self._hook],
-        }
-        if self.archive_path:
-            opts["download_archive"] = self.archive_path
-
-        # Add cookie support for platforms that require authentication (Instagram, Vimeo private, etc.)
-        if self.cookies_from_browser:
-            opts["cookies_from_browser"] = ("chrome",)
-        elif self.cookie_path and Path(self.cookie_path).exists():
-            opts["cookies"] = self.cookie_path
-
-        # Add browser impersonation ONLY when cookies are being used
-        # (for Instagram private, Vimeo private, etc.) or for platforms known to block default yt-dlp UA
-        # YouTube works fine without impersonation; only Dailymotion/Vimeo/Instagram need it
-        needs_impersonation = (
-            self.cookies_from_browser or
-            (self.cookie_path and Path(self.cookie_path).exists())
+        opts = build_format_opts(
+            audio_only=self.audio_only,
+            height=self.height,
+            container=self.container,
+            bitrate=self.bitrate,
+            embed_metadata=self.embed_metadata,
+            embed_thumbnail=self.embed_thumbnail,
+            outdir=self.outdir,
+            archive_path=self.archive_path,
+            playlist=self.playlist,
         )
-        if needs_impersonation:
-            try:
-                from yt_dlp.networking.impersonate import ImpersonateTarget
-                try:
-                    opts["impersonate"] = ImpersonateTarget.from_str("chrome")
-                except Exception:
-                    opts["impersonate"] = "chrome"
-            except ImportError:
-                opts["impersonate"] = "chrome"
+        opts["progress_hooks"] = [self._hook]
+        opts.update(build_cookie_opts(self.cookie_path,
+                                      self.cookies_from_browser))
 
         # Download the thumbnail file so EmbedThumbnail has something to embed.
-        if self.embed_thumbnail and self._thumbnail_supported():
+        if self.embed_thumbnail and _thumbnail_supported(self.audio_only,
+                                                         self.container):
             opts["writethumbnail"] = True
 
-        extra_pps = self._extra_postprocessors()
-
-        if self.audio_only:
-            codec = {"mp3": "mp3", "m4a": "aac", "opus": "opus"}.get(self.container, "mp3")
-            opts.update({
-                "format": "ba/b",
-                # Use %(ext)s — FFmpegExtractAudio rewrites the extension after
-                # conversion, so hardcoding it here causes a double extension
-                # (e.g. "title.m4a.m4a").
-                "outtmpl": str(Path(self.outdir) / "%(title)s.%(ext)s"),
-                "postprocessors": [{
-                    "key": "FFmpegExtractAudio",
-                    "preferredcodec": codec,
-                    "preferredquality": str(self.bitrate),
-                }] + extra_pps,
-            })
-            return opts
-        if self.height:
-            fmt = f"bv*[height<={self.height}]+ba/b[height<={self.height}]/b"
-        else:
-            fmt = "bv*+ba/b"
-        opts.update({
-            "format": fmt,
-            "merge_output_format": self.container,
-            "outtmpl": str(Path(self.outdir) / "%(title)s [%(height)sp].%(ext)s"),
-        })
-        if extra_pps:
-            opts["postprocessors"] = extra_pps
         return opts
 
     def _collect_saved_paths(self, info: dict, ydl: YoutubeDL) -> list[str]:
@@ -234,14 +166,14 @@ class DownloadWorker(QThread):
 
 
 def audio_extensions() -> set[str]:
-    return {"mp3", "m4a", "opus"}
+    return set(AUDIO_CONTAINERS)
 
 
 def video_extensions() -> set[str]:
-    return {"mp4", "mkv", "webm"}
+    return set(VIDEO_CONTAINERS)
 
 
-class PlaylistInspectWorker(QThread):
+class PlaylistInspectWorker(CancellableWorker):
     """Inspect playlist URLs off the GUI thread to get their entry counts.
 
     Emits:
@@ -264,39 +196,15 @@ class PlaylistInspectWorker(QThread):
         self.threshold     = threshold
         self.cookie_path = cookie_path
         self.cookies_from_browser = cookies_from_browser
-        self._cancelled    = False
-
-    def cancel(self) -> None:
-        self._cancelled = True
 
     def run(self) -> None:
         dry_opts = {
             "quiet": True, "no_warnings": True,
             "skip_download": True, "extract_flat": True,
         }
-        # Add cookie support for playlist inspection
-        if self.cookies_from_browser:
-            dry_opts["cookies_from_browser"] = ("chrome",)
-        elif self.cookie_path and Path(self.cookie_path).exists():
-            dry_opts["cookies"] = self.cookie_path
+        dry_opts.update(build_cookie_opts(self.cookie_path,
+                                          self.cookies_from_browser))
 
-        # Add browser impersonation ONLY when cookies are being used
-        # (for Instagram private, Vimeo private, etc.) or for platforms known to block default yt-dlp UA
-        # YouTube works fine without impersonation; only Dailymotion/Vimeo/Instagram need it
-        needs_impersonation = (
-            self.cookies_from_browser or
-            (self.cookie_path and Path(self.cookie_path).exists())
-        )
-        if needs_impersonation:
-            try:
-                from yt_dlp.networking.impersonate import ImpersonateTarget
-                try:
-                    dry_opts["impersonate"] = ImpersonateTarget.from_str("chrome")
-                except Exception:
-                    dry_opts["impersonate"] = "chrome"
-            except ImportError:
-                dry_opts["impersonate"] = "chrome"
-        
         total = len(self.playlist_urls)
         big: list[tuple[str, int, str, str]] = []
         for i, p_url in enumerate(self.playlist_urls, 1):
@@ -323,7 +231,7 @@ class PlaylistInspectWorker(QThread):
             self.done.emit(big)
 
 
-class FileSizeWorker(QThread):
+class FileSizeWorker(CancellableWorker):
     """Fetch video metadata (title, duration, estimated file size) from a single URL.
 
     Emits:
@@ -347,40 +255,11 @@ class FileSizeWorker(QThread):
 
     def run(self) -> None:
         try:
-            opts: dict = {
-                "quiet": True,
-                "no_warnings": True,
-                "skip_download": True,
-            }
-            # Add cookie support for metadata fetching
-            if self.cookies_from_browser:
-                opts["cookies_from_browser"] = ("chrome",)
-            elif self.cookie_path and Path(self.cookie_path).exists():
-                opts["cookies"] = self.cookie_path
+            opts = build_dry_opts(self.audio_only, self.cookie_path,
+                                  self.cookies_from_browser)
 
-            # Add browser impersonation ONLY when cookies are being used
-            # (for Instagram private, Vimeo private, etc.) or for platforms known to block default yt-dlp UA
-            # YouTube works fine without impersonation; only Dailymotion/Vimeo/Instagram need it
-            needs_impersonation = (
-                self.cookies_from_browser or
-                (self.cookie_path and Path(self.cookie_path).exists())
-            )
-            if needs_impersonation:
-                try:
-                    from yt_dlp.networking.impersonate import ImpersonateTarget
-                    try:
-                        opts["impersonate"] = ImpersonateTarget.from_str("chrome")
-                    except Exception:
-                        opts["impersonate"] = "chrome"
-                except ImportError:
-                    opts["impersonate"] = "chrome"
-            
-            if self.audio_only:
-                opts["format"] = "ba/b"
-            elif self.height:
+            if self.height and not self.audio_only:
                 opts["format"] = f"bv*[height<={self.height}]+ba/b[height<={self.height}]/b"
-            else:
-                opts["format"] = "bv*+ba/b"
 
             with YoutubeDL(opts) as ydl:
                 info = ydl.extract_info(self.url, download=False)
@@ -409,8 +288,11 @@ class FileSizeWorker(QThread):
                 kbps = 128 if self.audio_only else 2500
                 filesize_mb = round(duration * kbps * 1000 / 8 / (1024 * 1024), 1)
 
+            if self._cancelled:
+                return
             self.result.emit(title, duration, filesize_mb, fmt_note or self.fmt,
                              self.audio_only, resolution)
 
         except Exception as exc:
-            self.error.emit(str(exc))
+            if not self._cancelled:
+                self.error.emit(str(exc))

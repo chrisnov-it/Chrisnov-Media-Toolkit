@@ -23,6 +23,7 @@ build/
 dist/
 icon.ico
 *.spec.bak
+artifacts-*/
 
 # Misc
 .pytest_cache/
