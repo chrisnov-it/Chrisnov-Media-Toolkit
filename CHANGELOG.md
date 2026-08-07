@@ -16,6 +16,11 @@ All notable changes to this project are documented here.
 
 ## [0.2.0-beta.2] — 2026-08-07
 
+**Highlights:** readable macOS fonts + Retina/HiDPI scaling, native Dark Mode
+support, and browser-cookie logins (Instagram private, Vimeo private, etc.)
+that now actually work — plus a significant internal refactor and new unit
+tests.
+
 ### Fixed
 
 - **Font too small on macOS** (`main.py`, `app/window.py`, `app/theme.py`)
