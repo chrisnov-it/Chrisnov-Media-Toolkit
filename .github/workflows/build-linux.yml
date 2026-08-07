@@ -110,6 +110,7 @@ jobs:
           tag_name: ${{ env.TAG_NAME }}
           name: Chrisnov Media Toolkit v${{ env.VERSION }}
           body_path: release_notes.md
+          update_release_body: true
           files: |
             artifacts/**/*.tar.gz
             artifacts/**/*.zip
