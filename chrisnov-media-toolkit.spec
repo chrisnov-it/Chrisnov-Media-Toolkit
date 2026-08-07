@@ -102,7 +102,7 @@ if is_macos:
         info_plist={
             'CFBundleName': 'Chrisnov Media Toolkit',
             'CFBundleDisplayName': 'Chrisnov Media Toolkit',
-            'CFBundleShortVersionString': os.environ.get('APP_VERSION', '0.2.0-beta.1'),
+            'CFBundleShortVersionString': os.environ.get('APP_VERSION', '0.2.0-beta.2'),
             'CFBundleVersion': os.environ.get('APP_BUILD_NUMBER', '1'),
             'NSHighResolutionCapable': True,
         },
