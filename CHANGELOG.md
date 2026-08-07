@@ -4,6 +4,75 @@ All notable changes to this project are documented here.
 
 ---
 
+## [Unreleased]
+
+### Fixed
+
+- **Font too small on macOS** (`main.py`, `app/window.py`, `app/theme.py`)
+  The 9pt base font introduced in v0.1.0-beta.5 was too small for macOS,
+  especially on MacBook Air 13-inch (Early 2015) which runs at 1280×800.
+  Added `app/theme.py` with platform-aware font sizing (11pt on macOS,
+  9pt on Linux/Windows) and macOS-native font family (`.SF NS Text`,
+  `-apple-system`). Also enabled `Qt.AA_EnableHighDpiScaling` and
+  `Qt.AA_UseHighDpiPixmaps` before QApplication creation for proper
+  Retina/Display scaling on macOS.
+
+- **Dark Mode not adapting** (`app/theme.py`, `app/window.py`)
+  All widget colors were hardcoded as light-mode hex values, so the UI
+  did not adapt when macOS switched to Dark Mode. Replaced the hardcoded
+  stylesheet in `MainWindow._apply_style()` with a palette-aware version
+  from `theme.py` that dynamically reads colors from `QPalette`. Added
+  a `MainWindow.changeEvent()` handler that re-applies the palette-aware
+  stylesheet on `QEvent.PaletteChange` and `QEvent.ColorSchemeChange`
+  (Qt 6.5+) so the UI adapts at runtime without a restart.
+
+- **Cookie options not applied to yt-dlp** (`app/worker.py`,
+  `app/yt_dlp_opts.py`)
+  During the worker refactor the cookie options were found to use
+  non-canonical yt-dlp keys (`cookies_from_browser` / `cookies`) that yt-dlp
+  silently ignores, so authenticated content (Instagram private, Vimeo
+  private, etc.) never actually used the configured cookies. Corrected to the
+  canonical `cookiesfrombrowser` / `cookiefile` keys in the shared
+  `build_cookie_opts()` helper.
+
+### Added
+
+- **`app/theme.py`** — Centralized theming module:
+  `enable_high_dpi()`, `_base_font_size()`, `_font_family()`,
+  `is_dark_mode()`, `global_stylesheet()`, `widget_stylesheet()`,
+  `_palette_color()`, `_is_dark_palette()`.
+
+- **Unit tests for `app/ffmpeg_utils` and `app/yt_dlp_opts`**
+  (`tests/test_ffmpeg_utils.py`, `tests/test_yt_dlp_opts.py`)
+  Cover binary discovery, duration/loudness probing, output-path
+  resolution, progress-aware ffmpeg execution (including cancellation),
+  and the shared yt-dlp option builders (cookie/impersonation, format
+  opts, dry-run opts) extracted during the workers refactor.
+
+### Changed
+
+- **Embed metadata checkbox default** (`app/window.py`)
+  The "Embed metadata" checkbox in the Downloader tab now defaults to
+  unchecked (matching the default video mode). When the user checks
+  "Audio only", the checkbox is automatically checked — ID3 tag embedding
+  benefits audio files and avoids manual tag editing later. Unchecking
+  "Audio only" automatically unchecks the metadata checkbox again.
+  Video downloads no longer embed metadata by default.
+
+- **Workers refactored into shared helpers** (`app/base_worker.py`,
+  `app/ffmpeg_utils.py`, `app/yt_dlp_opts.py`, `app/worker.py`,
+  `app/converter_worker.py`)
+  Introduced a shared `CancellableWorker(QThread)` base class (one
+  cancellation pattern for all workers) and extracted the duplicated
+  FFmpeg helpers (`find_ffmpeg`/`find_ffprobe`, `probe_duration`,
+  `probe_loudness`, output-path resolution, progress-aware execution) and the
+  duplicated yt-dlp cookie/impersonation/format-option builders into dedicated
+  modules. Net effect: less duplication and a single source of truth for
+  option construction. No user-visible behavior change is intended (beyond the
+  cookie-key fix listed above).
+
+---
+
 ## [0.2.0-beta.1] — 2026-07-30
 
 ### Added

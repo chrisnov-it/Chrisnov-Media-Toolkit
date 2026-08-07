@@ -2,19 +2,24 @@
 
 from __future__ import annotations
 
-import json
-import re
-import shutil
 import subprocess
-import tempfile
-import time
 from pathlib import Path
 
-from PySide6.QtCore import QThread, Signal
+from PySide6.QtCore import Signal
+
+from .base_worker import CancellableWorker
+from .ffmpeg_utils import (
+    find_ffmpeg,
+    find_ffprobe,
+    probe_duration,
+    probe_loudness,
+    resolve_output_path,
+    run_ffmpeg_with_progress,
+)
 
 
 # ---------------------------------------------------------------------------
-# Constants
+# Constants (re-exported for external callers / window.py)
 # ---------------------------------------------------------------------------
 
 SUPPORTED_INPUT_EXTENSIONS = {
@@ -23,138 +28,31 @@ SUPPORTED_INPUT_EXTENSIONS = {
     # Video (extract audio)
     "mp4", "mkv", "webm", "avi", "mov", "wmv", "flv", "ts", "m4v",
 }
-
 OUTPUT_FORMATS = ["mp3", "m4a", "opus", "flac", "wav"]
-
 VIDEO_INPUT_EXTENSIONS = {
     "mp4", "mkv", "webm", "avi", "mov", "wmv", "flv", "ts", "m4v",
 }
-
 VIDEO_OUTPUT_FORMATS = ["mp4", "mkv", "webm"]
-
 VIDEO_QUALITY_PRESETS = [
     ("Keep quality", "keep"),
     ("Balanced", "balanced"),
     ("Smaller file", "small"),
 ]
-
 SAMPLE_RATES = [
     ("As-is (no change)", None),
     ("44100 Hz (CD / standard)", 44100),
     ("48000 Hz (video / broadcast)", 48000),
     ("96000 Hz (hi-res)", 96000),
 ]
-
 AUDIO_BITRATES = ["96", "128", "160", "192", "256", "320"]
 
-# EBU R128 default target
+# EBU R128 default targets
 DEFAULT_LUFS = -14.0
 DEFAULT_TRUE_PEAK = -1.0
 DEFAULT_LRA = 11.0
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-def find_ffmpeg() -> str:
-    """Return path to ffmpeg binary, preferring project-local bin/ or PyInstaller bundled bin/."""
-    import sys
-    ext = ".exe" if sys.platform == "win32" else ""
-
-    # 1. Check PyInstaller temp directory (sys._MEIPASS)
-    if hasattr(sys, "_MEIPASS"):
-        bundled = Path(sys._MEIPASS) / "bin" / f"ffmpeg{ext}"
-        if bundled.exists():
-            return str(bundled)
-
-    # 2. Check local project-level bin/ folder
-    local = Path(__file__).resolve().parent.parent / "bin" / f"ffmpeg{ext}"
-    if local.exists():
-        return str(local)
-
-    # 3. Check system PATH
-    system = shutil.which("ffmpeg")
-    if system:
-        return system
-
-    raise FileNotFoundError(
-        "ffmpeg not found. Install it with: sudo apt install ffmpeg"
-    )
-
-
-def find_ffprobe() -> str:
-    """Return path to ffprobe binary, preferring project-local bin/ or PyInstaller bundled bin/."""
-    import sys
-    ext = ".exe" if sys.platform == "win32" else ""
-
-    # 1. Check PyInstaller temp directory (sys._MEIPASS)
-    if hasattr(sys, "_MEIPASS"):
-        bundled = Path(sys._MEIPASS) / "bin" / f"ffprobe{ext}"
-        if bundled.exists():
-            return str(bundled)
-
-    # 2. Check local project-level bin/ folder
-    local = Path(__file__).resolve().parent.parent / "bin" / f"ffprobe{ext}"
-    if local.exists():
-        return str(local)
-
-    # 3. Check system PATH
-    system = shutil.which("ffprobe")
-    if system:
-        return system
-
-    raise FileNotFoundError("ffprobe not found.")
-
-
-def probe_duration(ffprobe: str, src: Path) -> float | None:
-    """Return media duration in seconds, or None if ffprobe cannot determine it."""
-    cmd = [
-        ffprobe, "-v", "error",
-        "-show_entries", "format=duration",
-        "-of", "default=noprint_wrappers=1:nokey=1",
-        str(src),
-    ]
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
-    if result.returncode != 0:
-        return None
-    try:
-        duration = float(result.stdout.strip())
-    except ValueError:
-        return None
-    return duration if duration > 0 else None
-
-
-def probe_loudness(ffmpeg: str, src: Path) -> dict:
-    """Run EBU R128 first-pass loudness scan. Returns loudnorm measured values."""
-    cmd = [
-        ffmpeg, "-hide_banner", "-nostats",
-        "-i", str(src),
-        "-af", (
-            f"loudnorm=I={DEFAULT_LUFS}:TP={DEFAULT_TRUE_PEAK}"
-            f":LRA={DEFAULT_LRA}:print_format=json"
-        ),
-        "-f", "null", "-",
-    ]
-    result = subprocess.run(
-        cmd, capture_output=True, text=True, timeout=300
-    )
-    # loudnorm prints JSON to stderr
-    stderr = result.stderr
-    # Extract the JSON block from stderr
-    match = re.search(r"\{[^{}]+\}", stderr, re.DOTALL)
-    if not match:
-        raise RuntimeError(
-            f"loudnorm scan failed — no JSON in output.\nstderr: {stderr[-500:]}"
-        )
-    return json.loads(match.group())
-
-
-# ---------------------------------------------------------------------------
-# Worker
-# ---------------------------------------------------------------------------
-
-class ConvertWorker(QThread):
+class ConvertWorker(CancellableWorker):
     """Convert a single file using ffmpeg. Emits progress (0-100), status, and result."""
 
     progress = Signal(int)      # 0-100
@@ -191,11 +89,12 @@ class ConvertWorker(QThread):
         self.trim_silence = trim_silence
         self.clean_tags   = clean_tags
         self.idx_label    = idx_label
-        self._cancelled = False
+        self.duration: float | None = None
         self._process: subprocess.Popen[str] | None = None
 
     def cancel(self) -> None:
-        self._cancelled = True
+        """Request cancellation and terminate any active ffmpeg process."""
+        super().cancel()
         if self._process and self._process.poll() is None:
             self._process.terminate()
 
@@ -208,7 +107,9 @@ class ConvertWorker(QThread):
             ffmpeg = find_ffmpeg()
             ffprobe = find_ffprobe()
             self.duration = probe_duration(ffprobe, self.src)
-            out_path = self._resolve_output_path()
+            out_path = resolve_output_path(
+                self.src, self.outdir, self.fmt, self.clean_tags,
+            )
 
             if self.norm_mode == "ebu":
                 self._run_with_ebu(ffmpeg, out_path)
@@ -237,24 +138,6 @@ class ConvertWorker(QThread):
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
-
-    def _resolve_output_path(self) -> Path:
-        """Build output path, appending numeric suffix on collision."""
-        if self.clean_tags:
-            from .cleaner import clean_title
-            stem = clean_title(self.src.stem, self.clean_tags)
-        else:
-            stem = self.src.stem
-
-        base = self.outdir / f"{stem}.{self.fmt}"
-        if not base.exists():
-            return base
-        counter = 1
-        while True:
-            candidate = self.outdir / f"{stem} ({counter}).{self.fmt}"
-            if not candidate.exists():
-                return candidate
-            counter += 1
 
     def _audio_filters(self, loudnorm_apply: str | None = None) -> list[str]:
         """Build -af filter chain based on settings."""
@@ -356,7 +239,7 @@ class ConvertWorker(QThread):
         cmd = self._build_cmd(ffmpeg, out_path, af)
         self.status.emit(f"{self.idx_label} Converting {self.src.name}...")
         self.progress.emit(10)
-        self._exec(cmd, progress_floor=10, progress_ceiling=90)
+        self._run_ffmpeg(cmd, progress_floor=10, progress_ceiling=90)
         self.progress.emit(90)
 
     def _run_with_ebu(self, ffmpeg: str, out_path: Path) -> None:
@@ -364,7 +247,12 @@ class ConvertWorker(QThread):
         # Pass 1 — measure
         self.status.emit(f"{self.idx_label} Scanning loudness (pass 1/2)...")
         self.progress.emit(5)
-        measured = probe_loudness(ffmpeg, self.src)
+        measured = probe_loudness(
+            ffmpeg, self.src,
+            default_lufs=DEFAULT_LUFS,
+            default_true_peak=DEFAULT_TRUE_PEAK,
+            default_lra=DEFAULT_LRA,
+        )
         self.progress.emit(40)
 
         # Build loudnorm filter with measured values for accurate 2nd pass
@@ -384,61 +272,32 @@ class ConvertWorker(QThread):
         self.status.emit(f"{self.idx_label} Applying loudnorm + converting (pass 2/2)...")
         af = self._audio_filters(loudnorm_apply=lnorm)
         cmd = self._build_cmd(ffmpeg, out_path, af)
-        self._exec(cmd, progress_floor=40, progress_ceiling=90)
+        self._run_ffmpeg(cmd, progress_floor=40, progress_ceiling=90)
         self.progress.emit(90)
 
-    def _exec(
-        self,
-        cmd: list[str],
-        *,
-        progress_floor: int = 0,
-        progress_ceiling: int = 100,
+    def _run_ffmpeg(
+        self, cmd: list[str], *, progress_floor: int = 0, progress_ceiling: int = 100,
     ) -> None:
-        """Run ffmpeg command, parsing progress and supporting cancellation."""
-        progress_cmd = cmd[:-1] + ["-progress", "pipe:1", "-nostats", cmd[-1]]
-        with tempfile.TemporaryFile("w+", encoding="utf-8", errors="replace") as stderr_file:
-            self._process = subprocess.Popen(
-                progress_cmd,
-                stdout=subprocess.PIPE,
-                stderr=stderr_file,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-            )
-            assert self._process.stdout is not None
-            last_emit = 0.0
-            for line in self._process.stdout:
-                if self._cancelled:
-                    self._process.terminate()
-                    break
-                key, _, value = line.strip().partition("=")
-                if key == "out_time_ms" and self.duration:
-                    try:
-                        elapsed = int(value) / 1_000_000
-                    except ValueError:
-                        continue
-                    pct = int(min(1.0, elapsed / self.duration) * (progress_ceiling - progress_floor))
-                    now = time.monotonic()
-                    if now - last_emit >= 0.2:
-                        self.progress.emit(progress_floor + pct)
-                        last_emit = now
-            try:
-                code = self._process.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                self._process.kill()
-                code = self._process.wait()
-            stderr_file.seek(0)
-            stderr_tail = stderr_file.read()[-800:]
-            self._process = None
-        if self._cancelled:
-            raise RuntimeError("Cancelled.")
-        if code != 0:
-            raise RuntimeError(
-                f"ffmpeg error (exit {code}):\n{stderr_tail}"
-            )
+        """Execute an ffmpeg command with progress reporting and cancellation support.
+
+        Delegates to ffmpeg_utils.run_ffmpeg_with_progress, threading the
+        Popen object through self._process so cancel() can terminate it.
+        """
+        def _set_process(proc: subprocess.Popen[str] | None) -> None:
+            self._process = proc
+
+        run_ffmpeg_with_progress(
+            cmd,
+            duration=self.duration,
+            cancelled=lambda: self._cancelled,
+            on_progress=lambda pct: self.progress.emit(pct),
+            progress_floor=progress_floor,
+            progress_ceiling=progress_ceiling,
+            set_process=_set_process,
+        )
 
 
-class VideoConvertWorker(QThread):
+class VideoConvertWorker(CancellableWorker):
     """Convert a single video file using ffmpeg."""
 
     progress = Signal(int)
@@ -465,12 +324,12 @@ class VideoConvertWorker(QThread):
         self.copy_audio = copy_audio
         self.clean_tags = clean_tags
         self.idx_label = idx_label
-        self._cancelled = False
-        self._process: subprocess.Popen[str] | None = None
         self.duration: float | None = None
+        self._process: subprocess.Popen[str] | None = None
 
     def cancel(self) -> None:
-        self._cancelled = True
+        """Request cancellation and terminate any active ffmpeg process."""
+        super().cancel()
         if self._process and self._process.poll() is None:
             self._process.terminate()
 
@@ -479,12 +338,14 @@ class VideoConvertWorker(QThread):
             ffmpeg = find_ffmpeg()
             ffprobe = find_ffprobe()
             self.duration = probe_duration(ffprobe, self.src)
-            out_path = self._resolve_output_path()
+            out_path = resolve_output_path(
+                self.src, self.outdir, self.fmt, self.clean_tags,
+            )
             cmd = self._build_cmd(ffmpeg, out_path)
             self.status.emit(f"{self.idx_label} Converting {self.src.name}...")
             self.progress.emit(10)
             try:
-                self._exec(cmd)
+                self._run_ffmpeg(cmd)
             except RuntimeError:
                 if self._cancelled or not self.copy_audio:
                     raise
@@ -492,7 +353,7 @@ class VideoConvertWorker(QThread):
                     f"{self.idx_label} Audio stream incompatible, retrying with AAC/Opus..."
                 )
                 self.copy_audio = False
-                self._exec(self._build_cmd(ffmpeg, out_path))
+                self._run_ffmpeg(self._build_cmd(ffmpeg, out_path))
 
             if self.clean_tags:
                 from .cleaner import rename_with_cleanup
@@ -510,23 +371,6 @@ class VideoConvertWorker(QThread):
                 self.status.emit("Cancelled.")
             else:
                 self.failed.emit(str(exc))
-
-    def _resolve_output_path(self) -> Path:
-        if self.clean_tags:
-            from .cleaner import clean_title
-            stem = clean_title(self.src.stem, self.clean_tags)
-        else:
-            stem = self.src.stem
-
-        base = self.outdir / f"{stem}.{self.fmt}"
-        if not base.exists():
-            return base
-        counter = 1
-        while True:
-            candidate = self.outdir / f"{stem} ({counter}).{self.fmt}"
-            if not candidate.exists():
-                return candidate
-            counter += 1
 
     def _video_args(self) -> list[str]:
         if self.fmt == "webm":
@@ -557,45 +401,22 @@ class VideoConvertWorker(QThread):
         cmd += [str(out_path)]
         return cmd
 
-    def _exec(self, cmd: list[str]) -> None:
-        progress_cmd = cmd[:-1] + ["-progress", "pipe:1", "-nostats", cmd[-1]]
-        with tempfile.TemporaryFile("w+", encoding="utf-8", errors="replace") as stderr_file:
-            self._process = subprocess.Popen(
-                progress_cmd,
-                stdout=subprocess.PIPE,
-                stderr=stderr_file,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-            )
-            assert self._process.stdout is not None
-            last_emit = 0.0
-            for line in self._process.stdout:
-                if self._cancelled:
-                    self._process.terminate()
-                    break
-                key, _, value = line.strip().partition("=")
-                if key == "out_time_ms" and self.duration:
-                    try:
-                        elapsed = int(value) / 1_000_000
-                    except ValueError:
-                        continue
-                    pct = int(min(1.0, elapsed / self.duration) * 80)
-                    now = time.monotonic()
-                    if now - last_emit >= 0.2:
-                        self.progress.emit(10 + pct)
-                        last_emit = now
-            try:
-                code = self._process.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                self._process.kill()
-                code = self._process.wait()
-            stderr_file.seek(0)
-            stderr_tail = stderr_file.read()[-800:]
-            self._process = None
-        if self._cancelled:
-            raise RuntimeError("Cancelled.")
-        if code != 0:
-            raise RuntimeError(
-                f"ffmpeg error (exit {code}):\n{stderr_tail}"
-            )
+    def _run_ffmpeg(self, cmd: list[str]) -> None:
+        """Execute ffmpeg with progress reporting and cancellation support.
+
+        Delegates to ffmpeg_utils.run_ffmpeg_with_progress. The video converter
+        maps ffmpeg progress onto the 10-90 range (leaving 0-10 and 90-100 as
+        status/complete headroom in the caller).
+        """
+        def _set_process(proc: subprocess.Popen[str] | None) -> None:
+            self._process = proc
+
+        run_ffmpeg_with_progress(
+            cmd,
+            duration=self.duration,
+            cancelled=lambda: self._cancelled,
+            on_progress=lambda pct: self.progress.emit(pct),
+            progress_floor=10,
+            progress_ceiling=90,
+            set_process=_set_process,
+        )

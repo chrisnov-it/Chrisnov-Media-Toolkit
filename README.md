@@ -131,14 +131,40 @@ Chrisnov-Media-Toolkit/
 ├── main.py              # entry point
 ├── icon.svg             # app icon (SVG)
 ├── app/
-│   ├── constants.py     # presets, container lists, threshold
-│   ├── cleaner.py       # clean_title, rename_with_cleanup, discover_new_files
-│   ├── worker.py        # DownloadWorker (QThread subclass)
-│   ├── converter_worker.py # FFmpeg audio/video converter workers
-│   ├── window.py        # MainWindow (GUI)
-│   └── icon.py          # load_svg_icon helper
+│   ├── constants.py      # APP_VERSION, presets, container lists, thresholds
+│   ├── cleaner.py        # clean_title, rename_with_cleanup, discover_new_files
+│   ├── base_worker.py    # CancellableWorker — shared QThread base with cancel()
+│   ├── yt_dlp_opts.py    # Shared yt-dlp option builders (cookies, format, dry-run)
+│   ├── ffmpeg_utils.py   # FFmpeg binary discovery, probing, progress-aware execution
+│   ├── worker.py         # DownloadWorker, PlaylistInspectWorker, FileSizeWorker
+│   ├── converter_worker.py # ConvertWorker, VideoConvertWorker (FFmpeg-based)
+│   ├── window.py         # MainWindow (GUI)
+│   └── icon.py           # load_svg_icon helper
 └── .venv/               # Python venv with PySide6 + yt-dlp
 ```
+
+### Shared utilities (extracted to reduce duplication)
+
+- **`base_worker.py`** — `CancellableWorker` provides the `_cancelled` flag,
+  `cancel()` method, and `cancelled` property. All 5 worker classes
+  (`DownloadWorker`, `PlaylistInspectWorker`, `FileSizeWorker`,
+  `ConvertWorker`, `VideoConvertWorker`) inherit from it. Converter workers
+  override `cancel()` to also terminate their FFmpeg subprocess.
+
+- **`yt_dlp_opts.py`** — Centralizes yt-dlp option construction:
+  - `build_cookie_opts()` — cookie + browser impersonation (was duplicated 3×)
+  - `build_format_opts()` — download format/outtmpl/postprocessors (was inline in `_build_opts()`)
+  - `build_dry_opts()` — metadata-only extraction opts (was inline in `FileSizeWorker.run()`)
+  - `_thumbnail_supported()` / `_extra_postprocessors()` — thumbnail embedding
+    gate + postprocessor list (was inline in `DownloadWorker`)
+
+- **`ffmpeg_utils.py`** — Centralizes FFmpeg operations:
+  - `find_ffmpeg()` / `find_ffprobe()` — binary discovery (3-tier: PyInstaller → local → PATH)
+  - `probe_duration()` / `probe_loudness()` — media probing
+  - `resolve_output_path()` — collision-aware output path building
+  - `run_ffmpeg_with_progress()` — generic ffmpeg execution with `-progress`
+    parsing, cancellation support, and progress range mapping
+
 
 ## Architecture
 

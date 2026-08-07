@@ -23,6 +23,7 @@ from .constants import (
     APP_VERSION, RES_PRESETS, VIDEO_CONTAINERS, AUDIO_CONTAINERS, AUDIO_BITRATES,
     PLAYLIST_CONFIRM_THRESHOLD, MAX_HISTORY_ENTRIES,
 )
+from .theme import widget_stylesheet, _base_font_size as _font_size
 from .cleaner import (
     DEFAULT_CLEAN_TAGS, parse_tag_list, rename_with_cleanup, discover_new_files,
 )
@@ -63,6 +64,32 @@ class MainWindow(QWidget):
         
         self._build_ui()
         self._history_render()
+
+    def changeEvent(self, event):
+        """Re-apply palette-aware stylesheet when system theme changes.
+
+        On macOS, when the user switches between Light and Dark Mode,
+        Qt sends a QEvent.PaletteChange (or QEvent.ColorSchemeChange on
+        Qt 6.5+). We catch it here to refresh the widget stylesheet so the
+        UI adapts without needing a restart.
+
+        Re-entrancy is guarded by checking that a stylesheet is already
+        applied before re-applying, preventing infinite loops when
+        setStyleSheet() itself triggers palette events.
+        """
+        from PySide6.QtCore import QEvent
+        theme_event_types = {QEvent.Type.PaletteChange}
+        if hasattr(QEvent.Type, "ColorSchemeChange"):
+            theme_event_types.add(QEvent.Type.ColorSchemeChange)
+        if event.type() in theme_event_types:
+            # Guard against re-entrancy: setStyleSheet can trigger PaletteChange
+            if not getattr(self, "_theme_refreshing", False):
+                self._theme_refreshing = True
+                try:
+                    self.setStyleSheet(widget_stylesheet())
+                finally:
+                    self._theme_refreshing = False
+        super().changeEvent(event)
 
     # ------------------------------------------------------------------ #
     #  Persistent folder settings (QSettings)                             #
@@ -252,122 +279,12 @@ class MainWindow(QWidget):
         return scroll
 
     def _apply_style(self) -> None:
-        self.setStyleSheet("""
-            QWidget {
-                font-family: "Segoe UI", "Noto Sans", Arial, sans-serif;
-                font-size: 9pt;
-            }
-            QTabWidget::pane {
-                border: 1px solid #d7dce2;
-                border-radius: 6px;
-                background: #fbfcfd;
-            }
-            QTabBar::tab {
-                padding: 4px 10px;
-                margin-right: 2px;
-                border-top-left-radius: 5px;
-                border-top-right-radius: 5px;
-                background: #eef2f6;
-                color: #26313d;
-                font-size: 9pt;
-            }
-            QTabBar::tab:selected {
-                background: #ffffff;
-                border: 1px solid #d7dce2;
-                border-bottom-color: #ffffff;
-            }
-            QGroupBox {
-                border: 1px solid #d7dce2;
-                border-radius: 6px;
-                margin-top: 8px;
-                padding: 8px 8px 6px 8px;
-                font-weight: 600;
-            }
-            QGroupBox::title {
-                subcontrol-origin: margin;
-                left: 8px;
-                padding: 0 3px;
-            }
-            QLineEdit, QComboBox, QListWidget, QDoubleSpinBox, QSpinBox {
-                min-height: 26px;
-                border: 1px solid #cbd3dc;
-                border-radius: 5px;
-                padding: 2px 6px;
-                background: #ffffff;
-                font-size: 9pt;
-            }
-            QPushButton {
-                min-height: 27px;
-                padding: 3px 10px;
-                border: 1px solid #b8c2cc;
-                border-radius: 5px;
-                background: #f5f7fa;
-                font-size: 9pt;
-            }
-            QPushButton:hover {
-                background: #edf2f7;
-            }
-            QPushButton:pressed {
-                background: #e2e8f0;
-            }
-            QPushButton:disabled {
-                color: #8a94a0;
-                background: #edf0f3;
-            }
-            QPushButton#primaryButton {
-                color: #ffffff;
-                border-color: #226ac7;
-                background: #2f80ed;
-                font-weight: 600;
-            }
-            QPushButton#primaryButton:hover {
-                background: #2a73d8;
-            }
-            QPushButton#dangerButton {
-                color: #a62929;
-                border-color: #e1b4b4;
-                background: #fff5f5;
-            }
-            QPushButton#dangerButton:hover {
-                background: #ffe8e8;
-            }
-            QCheckBox, QRadioButton {
-                font-size: 9pt;
-            }
-            QProgressBar {
-                min-height: 14px;
-                max-height: 16px;
-                border: 1px solid #cbd3dc;
-                border-radius: 6px;
-                text-align: center;
-                background: #eef2f6;
-            }
-            QProgressBar::chunk {
-                border-radius: 6px;
-                background: #2f80ed;
-            }
-            QLabel#appNameLabel {
-                font-size: 11pt;
-                font-weight: 700;
-                color: #1a2533;
-            }
-            QLabel#versionLabel {
-                font-size: 8pt;
-                color: #8a94a0;
-                padding-top: 2px;
-            }
-            QPushButton#aboutButton {
-                font-size: 8pt;
-                color: #4a5568;
-                border-color: #d7dce2;
-                background: transparent;
-                min-height: 24px;
-                padding: 2px 8px;
-            }
-            QPushButton#aboutButton:hover {
-                background: #edf2f7;
-            }
-        """)
+        """Apply the palette-aware stylesheet from theme.py.
+
+        Uses palette-derived colors instead of hardcoded hex values so the
+        UI adapts automatically to Light/Dark Mode and platform font sizes.
+        """
+        self.setStyleSheet(widget_stylesheet())
 
     # ------------------------------------------------------------------ #
     #  Tab 1 — Downloader                                                  #
@@ -424,27 +341,27 @@ class MainWindow(QWidget):
         # App name + version
         name_lbl = QLabel("Chrisnov Media Toolkit")
         name_lbl.setAlignment(Qt.AlignCenter)
-        name_lbl.setStyleSheet("font-size: 13pt; font-weight: 700; color: #1a2533;")
+        name_lbl.setStyleSheet("font-size: 13pt; font-weight: 700;")
         layout.addWidget(name_lbl)
 
         ver_lbl = QLabel(f"Version {APP_VERSION}")
         ver_lbl.setAlignment(Qt.AlignCenter)
-        ver_lbl.setStyleSheet("font-size: 9pt; color: #8a94a0; margin-bottom: 12px;")
+        ver_lbl.setStyleSheet("font-size: 9pt; color: palette(text); margin-bottom: 12px;")
         layout.addWidget(ver_lbl)
 
         # Divider
         line = QLabel()
         line.setFixedHeight(1)
-        line.setStyleSheet("background: #d7dce2; margin: 8px 0;")
+        line.setStyleSheet("background: palette(dark); margin: 8px 0;")
         layout.addWidget(line)
 
         # Info rows
         def _row(label: str, value: str) -> None:
             row = QHBoxLayout()
             lbl = QLabel(label)
-            lbl.setStyleSheet("color: #4a5568; font-size: 9pt;")
+            lbl.setStyleSheet("color: palette(text); font-size: 9pt;")
             val = QLabel(value)
-            val.setStyleSheet("color: #1a2533; font-size: 9pt;")
+            val.setStyleSheet("color: palette(windowText); font-size: 9pt;")
             val.setAlignment(Qt.AlignRight)
             row.addWidget(lbl)
             row.addStretch()
@@ -476,13 +393,14 @@ class MainWindow(QWidget):
         if newer_versions:
             notice = QLabel(f"Update available: {', '.join(newer_versions)}")
             notice.setStyleSheet("color: #e53e3e; font-size: 9pt; margin-top: 8px;")
+            # Note: red error color is intentional — should remain red in both modes
             notice.setAlignment(Qt.AlignCenter)
             layout.addWidget(notice)
 
         # Divider
         line2 = QLabel()
         line2.setFixedHeight(1)
-        line2.setStyleSheet("background: #d7dce2; margin: 8px 0;")
+        line2.setStyleSheet("background: palette(dark); margin: 8px 0;")
         layout.addWidget(line2)
 
         # Description
@@ -491,7 +409,7 @@ class MainWindow(QWidget):
             "built with PySide6, yt-dlp, and FFmpeg."
         )
         desc.setAlignment(Qt.AlignCenter)
-        desc.setStyleSheet("font-size: 9pt; color: #4a5568;")
+        desc.setStyleSheet("font-size: 9pt; color: palette(text);")
         layout.addWidget(desc)
 
         credit = QLabel(
@@ -499,7 +417,7 @@ class MainWindow(QWidget):
             '© Chrisnov IT Solutions</a>'
         )
         credit.setAlignment(Qt.AlignCenter)
-        credit.setStyleSheet("font-size: 8pt; color: #8a94a0; margin-top: 4px;")
+        credit.setStyleSheet("font-size: 8pt; color: palette(text); margin-top: 4px;")
         credit.setOpenExternalLinks(True)
         layout.addWidget(credit)
 
@@ -508,7 +426,7 @@ class MainWindow(QWidget):
             "chrisnov-it on GitHub</a>"
         )
         gh_link.setAlignment(Qt.AlignCenter)
-        gh_link.setStyleSheet("font-size: 7pt; color: #8a94a0;")
+        gh_link.setStyleSheet("font-size: 7pt; color: palette(text);")
         gh_link.setOpenExternalLinks(True)
         layout.addWidget(gh_link)
 
@@ -582,7 +500,9 @@ class MainWindow(QWidget):
         chk_row2 = QHBoxLayout()
         self.embed_meta_chk = QCheckBox("Embed metadata")
         self.embed_meta_chk.setToolTip("Write title, artist, and other tags into the file")
-        self.embed_meta_chk.setChecked(True)
+        # Default: unchecked (matches the default video mode; auto-enabled when
+        # the user checks "Audio only" via _on_audio_toggled)
+        self.embed_meta_chk.setChecked(False)
         chk_row2.addWidget(self.embed_meta_chk)
         self.embed_thumb_chk = QCheckBox("Embed thumbnail")
         self.embed_thumb_chk.setToolTip(
@@ -609,7 +529,7 @@ class MainWindow(QWidget):
         cookie_row.addWidget(self.cookie_path_btn)
         
         self.cookie_path_label = QLabel(self.cookie_path[:40] + "..." if len(self.cookie_path) > 40 else self.cookie_path)
-        self.cookie_path_label.setStyleSheet("color: #666;" if not self.cookie_path else "")
+        self.cookie_path_label.setStyleSheet("color: palette(text);" if not self.cookie_path else "")
         cookie_row.addWidget(self.cookie_path_label)
         cookie_row.addStretch()
         root.addLayout(cookie_row)
@@ -673,8 +593,9 @@ class MainWindow(QWidget):
         self.info_box = QLabel("")
         self.info_box.setWordWrap(True)
         self.info_box.setStyleSheet(
-            "background: #f0f5ff; border: 1px solid #b3d4ff; "
-            "border-radius: 4px; padding: 4px 8px; font-size: 9pt; color: #1a2533;"
+            "background: palette(light, mid); border: 1px solid palette(light, midlight); "
+            "border-radius: 4px; padding: 4px 8px; font-size: "
+            + _font_size() + "; color: palette(windowText);"
         )
         self.info_box.hide()
         root.addWidget(self.info_box)
@@ -1003,7 +924,7 @@ class MainWindow(QWidget):
         title.setStyleSheet("font-weight:600; font-size:10pt;")
         header.addWidget(title)
         self._history_summary = QLabel("")
-        self._history_summary.setStyleSheet("color:#8a94a0; font-size:8pt; padding-left:4px;")
+        self._history_summary.setStyleSheet("color: palette(text); font-size: 8pt; padding-left: 4px;")
         header.addWidget(self._history_summary)
         header.addStretch()
         self._history_clear_btn = QPushButton("Clear All")
@@ -1033,14 +954,14 @@ class MainWindow(QWidget):
 
         # Legend
         legend = QLabel("\U0001f4c2 = Open folder   \U0001f501 = Download again")
-        legend.setStyleSheet("color:#8a94a0; font-size:7pt;")
+        legend.setStyleSheet("color: palette(text); font-size: 7pt;")
         legend.setAlignment(Qt.AlignCenter)
         root.addWidget(legend)
 
         # Empty state placeholder
         self._history_empty = QLabel("No downloads yet.\nPress Start to begin downloading.")
         self._history_empty.setAlignment(Qt.AlignCenter)
-        self._history_empty.setStyleSheet("color:#8a94a0; font-size:9pt; padding:40px;")
+        self._history_empty.setStyleSheet("color: palette(text); font-size: 9pt; padding: 40px;")
         root.addWidget(self._history_empty)
 
         return w
@@ -1356,6 +1277,10 @@ class MainWindow(QWidget):
             self._save_dir(key, d)
 
     def _on_audio_toggled(self, checked: bool) -> None:
+        # Audio mode benefits from metadata embedding (ID3 tags) so the user
+        # doesn't have to manually edit tags later. Video files don't need it,
+        # so we toggle the checkbox to match the mode.
+        self.embed_meta_chk.setChecked(checked)
         # Remember whatever folder is currently shown for the mode we're leaving,
         # then restore the saved folder for the mode we're entering.
         current = self.dir_input.text().strip()
@@ -1389,7 +1314,7 @@ class MainWindow(QWidget):
     def _on_cookies_toggled(self, checked: bool) -> None:
         self.cookies_from_browser = checked
         self._settings.setValue("cookies_from_browser", checked)
-        self.cookie_path_label.setStyleSheet("color: #666;" if not self.cookie_path else "")
+        self.cookie_path_label.setStyleSheet("color: palette(text);" if not self.cookie_path else "")
 
     def _browse_cookie_file(self) -> None:
         d, _ = QFileDialog.getOpenFileName(
