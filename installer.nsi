@@ -3,7 +3,7 @@
 ; Usage: makensis installer.nsi
 
 !define PRODUCT_NAME "Chrisnov Media Toolkit"
-!define PRODUCT_VERSION "0.2.0-beta.1"
+!define PRODUCT_VERSION "0.2.0-beta.2"
 !define PRODUCT_PUBLISHER "Chrisnov IT Solutions"
 !define PRODUCT_WEB_SITE "https://chrisnov.com"
 !define PRODUCT_UNINST_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\${PRODUCT_NAME}"

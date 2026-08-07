@@ -6,6 +6,16 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
+### Added
+
+### Changed
+
+### Fixed
+
+---
+
+## [0.2.0-beta.2] — 2026-08-07
+
 ### Fixed
 
 - **Font too small on macOS** (`main.py`, `app/window.py`, `app/theme.py`)
