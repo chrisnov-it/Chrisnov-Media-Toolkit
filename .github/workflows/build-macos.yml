@@ -35,6 +35,11 @@ jobs:
       BUILD_TYPE: LITE
       ZIP_SUFFIX: ${{ matrix.zip_suffix }}
       HOMEBREW_NO_AUTO_UPDATE: 1
+      # Pin the macOS deployment target so the app can run on older Intel Macs
+      # (e.g. 2015 MacBook Air on Monterey). Without this, building on the
+      # Sequoia runner bakes in a newer SDK/Python baseline and the app silently
+      # fails to launch on the older macOS.
+      MACOSX_DEPLOYMENT_TARGET: "12.0"
 
     steps:
       - name: Check out repository
