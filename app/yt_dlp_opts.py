@@ -6,11 +6,15 @@ block previously copy-pasted across DownloadWorker, PlaylistInspectWorker,
 and FileSizeWorker, plus the duplicated format-opts and thumbnail-support
 logic in DownloadWorker._build_opts / _thumbnail_supported /
 _extra_postprocessors.
+
+Also hosts is_playlist_url(), the shared URL classifier that decides whether
+a URL is fetched as a whole playlist or as a single video.
 """
 
 from __future__ import annotations
 
 from pathlib import Path
+from urllib.parse import parse_qs, urlparse
 
 
 def build_cookie_opts(
@@ -192,3 +196,42 @@ def build_dry_opts(
     else:
         opts["format"] = "bv*+ba/b"
     return opts
+
+
+# ---------------------------------------------------------------------------
+# URL classification
+# ---------------------------------------------------------------------------
+
+def is_playlist_url(url: str) -> bool:
+    """Return True when *url* should be fetched as a whole playlist.
+
+    A URL pointing at a single video while merely carrying a ``list=``
+    parameter (youtube.com/watch?v=X&list=Y, youtu.be/X?list=Y — a video
+    opened from inside a playlist page) is NOT a playlist: the download then
+    passes noplaylist=True so yt-dlp fetches exactly that one video.
+    Only URLs that are themselves playlist pages (youtube.com/playlist?list=Y)
+    are classified as playlists.
+    """
+    parsed = urlparse(url)
+    host = (parsed.hostname or "").lower()
+    if not host:
+        return False
+    query = parse_qs(parsed.query)
+
+    is_youtube = host in ("youtu.be", "youtube.com") or host.endswith(".youtube.com")
+
+    if is_youtube:
+        if "list" not in query:
+            return False
+        if "v" in query:  # watch?v=X&list=Y → single video
+            return False
+        # youtu.be/ID?list=Y → single video; anything else here is a
+        # playlist?list=... page
+        return not (host == "youtu.be" and (parsed.path or "").strip("/"))
+
+    # Non-YouTube hosts: legacy heuristic — list= param marks a playlist
+    return "list=" in url and host in (
+        "vimeo.com", "player.vimeo.com",
+        "instagram.com", "www.instagram.com",
+        "dailymotion.com", "www.dailymotion.com",
+    )

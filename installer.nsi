@@ -1,9 +1,26 @@
 ; Chrisnov Media Toolkit - NSIS Installer Script
 ; Requires: NSIS 3.x (https://nsis.sourceforge.io/)
-; Usage: makensis installer.nsi
+;
+; Usage (from the project root, after build-windows.ps1 has produced dist\):
+;   makensis installer.nsi
+;
+; Optional defines:
+;   makensis -DPRODUCT_VERSION=0.2.0-beta.4 installer.nsi
+;       Override the version shown in Add/Remove Programs and the installer
+;       filename. Default below should be kept in sync with APP_VERSION in
+;       app/constants.py.
+;   makensis -DPRODUCT_LICENSE=LICENSE installer.nsi
+;       Include a license page (file must exist at the repo root).
+;
+; Build inputs:
+;   dist\chrisnov-media-toolkit-lite.exe   (from: .\build-windows.ps1 -Type Lite)
+;   bin\ffmpeg.exe, bin\ffprobe.exe        (only needed for the optional
+;                                           "Include FFmpeg" component)
 
 !define PRODUCT_NAME "Chrisnov Media Toolkit"
-!define PRODUCT_VERSION "0.2.0-beta.2"
+!ifndef PRODUCT_VERSION
+  !define PRODUCT_VERSION "0.2.0-beta.3"
+endif
 !define PRODUCT_PUBLISHER "Chrisnov IT Solutions"
 !define PRODUCT_WEB_SITE "https://chrisnov.com"
 !define PRODUCT_UNINST_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\${PRODUCT_NAME}"
@@ -25,8 +42,9 @@ ShowUnInstDetails show
 
 ; Pages
 !insertmacro MUI_PAGE_WELCOME
-!insertmacro MUI_PAGE_WELCOME
-!insertmacro MUI_PAGE_LICENSE "LICENSE"
+!ifdef PRODUCT_LICENSE
+  !insertmacro MUI_PAGE_LICENSE "${PRODUCT_LICENSE}"
+!endif
 !insertmacro MUI_PAGE_COMPONENTS
 !insertmacro MUI_PAGE_DIRECTORY
 !insertmacro MUI_PAGE_INSTFILES
@@ -46,21 +64,19 @@ ShowUnInstDetails show
 Section "Core Files (required)" SecCore
   SectionIn RO
   SetOutPath "$INSTDIR"
-  
-  ; Main executable
-  File "dist\chrisnov-media-toolkit.exe"
-  
-  ; Icon file (needed for runtime)
-  File "icon.svg"
-  
+
+  ; Main executable — produced by build-windows.ps1 as the Lite build.
+  ; Installed under the stable name the shortcuts and uninstaller reference.
+  File /oname=chrisnov-media-toolkit.exe "dist\chrisnov-media-toolkit-lite.exe"
+
   ; Create Start Menu shortcut
   CreateDirectory "$SMPROGRAMS\${PRODUCT_NAME}"
   CreateShortCut "$SMPROGRAMS\${PRODUCT_NAME}\${PRODUCT_NAME}.lnk" "$INSTDIR\chrisnov-media-toolkit.exe"
   CreateShortCut "$SMPROGRAMS\${PRODUCT_NAME}\Uninstall.lnk" "$INSTDIR\uninst.exe"
-  
+
   ; Write uninstaller
   WriteUninstaller "$INSTDIR\uninst.exe"
-  
+
   ; Write registry keys for Add/Remove Programs
   WriteRegStr ${PRODUCT_UNINST_ROOT_KEY} "${PRODUCT_UNINST_KEY}" "DisplayName" "${PRODUCT_NAME}"
   WriteRegStr ${PRODUCT_UNINST_ROOT_KEY} "${PRODUCT_UNINST_KEY}" "UninstallString" "$INSTDIR\uninst.exe"
@@ -79,8 +95,8 @@ SectionEnd
 
 ; Section descriptions
 !insertmacro MUI_FUNCTION_DESCRIPTION_BEGIN
-  !insertmacro MUI_DESCRIPTION_TEXT ${SecCore} "Main application executable. Required."
-  !insertmacro MUI_DESCRIPTION_TEXT ${SecBundled} "Include FFmpeg binaries (~150 MB additional). Required for audio/video conversion and local file conversion. Skip this if FFmpeg is already installed on your system (recommended for advanced users)."
+  !insertmacro MUI_DESCRIPTION_TEXT ${SecCore} "Chrisnov Media Toolkit application. Required. Without FFmpeg (below or on your system PATH), downloads still work but merging/conversion features are unavailable."
+  !insertmacro MUI_DESCRIPTION_TEXT ${SecBundled} "Include FFmpeg binaries (~150 MB additional), installed into the app's bin folder so the app finds them automatically. Required for audio/video conversion and yt-dlp format merging. Skip this if FFmpeg is already installed on your system (recommended for advanced users)."
 !insertmacro MUI_FUNCTION_DESCRIPTION_END
 
 ; Desktop shortcut function
@@ -91,20 +107,19 @@ FunctionEnd
 ; Uninstaller
 Section Uninstall
   Delete "$INSTDIR\chrisnov-media-toolkit.exe"
-  Delete "$INSTDIR\icon.svg"
   Delete "$INSTDIR\bin\ffmpeg.exe"
   Delete "$INSTDIR\bin\ffprobe.exe"
   Delete "$INSTDIR\uninst.exe"
   RMDir "$INSTDIR\bin"
   RMDir "$INSTDIR"
-  
+
   Delete "$SMPROGRAMS\${PRODUCT_NAME}\${PRODUCT_NAME}.lnk"
   Delete "$SMPROGRAMS\${PRODUCT_NAME}\Uninstall.lnk"
   RMDir "$SMPROGRAMS\${PRODUCT_NAME}"
-  
+
   Delete "$DESKTOP\${PRODUCT_NAME}.lnk"
-  
+
   DeleteRegKey ${PRODUCT_UNINST_ROOT_KEY} "${PRODUCT_UNINST_KEY}"
-  
+
   SetAutoClose true
 SectionEnd

@@ -58,7 +58,7 @@ class TestFileSizeWorkerCancel:
 
         assert errors == []
         assert len(results) == 1
-        title, duration, filesize_mb, fmt_note, audio_only, resolution = results[0]
+        title, duration, filesize_mb, _fmt_note, audio_only, _resolution = results[0]
         assert title == "Test Video"
         assert duration == 120
         assert filesize_mb == 10.0

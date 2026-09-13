@@ -13,7 +13,6 @@ from app.cleaner import (
     rename_with_cleanup,
 )
 
-
 # -- parse_tag_list ---------------------------------------------------------
 
 class TestParseTagList:
@@ -128,6 +127,7 @@ class TestRenameWithCleanup:
         f = tmp_path / "Song (Official Music Video).mp3"
         f.write_text("x")
         out = rename_with_cleanup(f, DEFAULT_CLEAN_TAGS)
+        assert out is not None
         assert out == tmp_path / "Song.mp3"
         assert out.exists()
         assert not f.exists()

@@ -1,5 +1,7 @@
 """Tests for app.converter_worker — codec args, sample rate, ffmpeg discovery."""
 
+from typing import ClassVar
+
 import pytest
 
 from app.converter_worker import (
@@ -133,8 +135,8 @@ class TestProbeDuration:
 
 
 class TestInputExtensions:
-    _audio_ext = {"mp3", "m4a", "opus", "wav", "flac", "aac", "ogg"}
-    _video_ext = {"mp4", "mkv", "webm", "mov", "avi", "m4v"}
+    _audio_ext: ClassVar[set[str]] = {"mp3", "m4a", "opus", "wav", "flac", "aac", "ogg"}
+    _video_ext: ClassVar[set[str]] = {"mp4", "mkv", "webm", "mov", "avi", "m4v"}
 
     def test_audio_extensions_superset(self):
         assert SUPPORTED_INPUT_EXTENSIONS >= self._audio_ext

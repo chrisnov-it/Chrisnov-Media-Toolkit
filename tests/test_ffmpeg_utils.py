@@ -7,6 +7,7 @@ workers refactor.
 
 from pathlib import Path
 from types import SimpleNamespace
+from typing import ClassVar
 
 import pytest
 
@@ -20,7 +21,6 @@ from app.ffmpeg_utils import (
     resolve_output_path,
     run_ffmpeg_with_progress,
 )
-
 
 # -- find_binary / find_ffmpeg / find_ffprobe --------------------------------
 
@@ -46,11 +46,42 @@ class TestFindBinary:
 
     def test_falls_back_to_system_path(self, monkeypatch):
         monkeypatch.delattr("sys._MEIPASS", raising=False)
+        monkeypatch.delattr("sys.frozen", raising=False)
         monkeypatch.setattr("shutil.which", lambda name: f"/usr/bin/{name}")
         assert find_binary("ffmpeg") == "/usr/bin/ffmpeg"
 
+    def test_frozen_app_finds_bin_next_to_exe(self, tmp_path, monkeypatch):
+        exe_dir = tmp_path / "install"
+        (exe_dir / "bin").mkdir(parents=True)
+        beside_exe = exe_dir / "bin" / "ffmpeg.exe"
+        beside_exe.write_text("binary")
+        monkeypatch.delattr("sys._MEIPASS", raising=False)
+        monkeypatch.setattr("sys.frozen", True, raising=False)
+        monkeypatch.setattr("sys.executable", str(exe_dir / "app.exe"))
+        monkeypatch.setattr("sys.platform", "win32")
+        monkeypatch.setattr("shutil.which", lambda name: None)
+
+        assert find_binary("ffmpeg") == str(beside_exe)
+
+    def test_bundled_beats_bin_next_to_exe(self, tmp_path, monkeypatch):
+        bundled_dir = tmp_path / "bundle"
+        (bundled_dir / "bin").mkdir(parents=True)
+        bundled = bundled_dir / "bin" / "ffmpeg.exe"
+        bundled.write_text("bundled")
+        exe_dir = tmp_path / "install"
+        (exe_dir / "bin").mkdir(parents=True)
+        beside_exe = exe_dir / "bin" / "ffmpeg.exe"
+        beside_exe.write_text("beside")
+        monkeypatch.setattr("sys._MEIPASS", str(bundled_dir), raising=False)
+        monkeypatch.setattr("sys.frozen", True, raising=False)
+        monkeypatch.setattr("sys.executable", str(exe_dir / "app.exe"))
+        monkeypatch.setattr("sys.platform", "win32")
+
+        assert find_binary("ffmpeg") == str(bundled)
+
     def test_raises_when_nowhere_to_be_found(self, monkeypatch):
         monkeypatch.delattr("sys._MEIPASS", raising=False)
+        monkeypatch.delattr("sys.frozen", raising=False)
         monkeypatch.setattr("shutil.which", lambda name: None)
         with pytest.raises(FileNotFoundError):
             find_binary("ffmpeg")
@@ -101,32 +132,6 @@ class TestProbeDuration:
         )
         assert probe_duration("/bin/ffprobe", Path("/tmp/x.mp3")) is None
 
-# -- probe_loudness ----------------------------------------------------------
-
-class TestProbeLoudness:
-    _JSON = (
-        '{"input_i":"-13.4","input_tp":"-1.2","input_lra":"6.3",'
-        '"input_thresh":"-23.1","target_offset":"0.4"}'
-    )
-
-    def test_parses_json_from_stderr(self, monkeypatch):
-        def fake_run(cmd, **kw):
-            return SimpleNamespace(stderr=f"noise above\n{self._JSON}\nnoise below")
-
-        monkeypatch.setattr("subprocess.run", fake_run)
-        out = probe_loudness("/bin/ffmpeg", Path("/tmp/x.wav"), -14.0, -1.0, 11.0)
-        assert out["input_i"] == "-13.4"
-        assert out["target_offset"] == "0.4"
-
-    def test_raises_when_no_json_in_output(self, monkeypatch):
-        monkeypatch.setattr(
-            "subprocess.run",
-            lambda *a, **k: SimpleNamespace(stderr="nothing here"),
-        )
-        with pytest.raises(RuntimeError):
-            probe_loudness("/bin/ffmpeg", Path("/tmp/x.wav"), -14.0, -1.0, 11.0)
-
-
 # -- resolve_output_path ------------------------------------------------------
 
 class TestResolveOutputPath:
@@ -156,14 +161,141 @@ class TestResolveOutputPath:
         assert out == tmp_path / "Song (Official Music Video).mp3"
 
 
+# -- probe_loudness -----------------------------------------------------------
+
+
+class _FakeScanPopen:
+    """Stand-in for the loudness-scan Popen.
+
+    poll() returns None until *exit_after_polls* polls have happened, then
+    the class-level exit_code. The stderr handle passed via kwargs receives
+    the canned loudnorm JSON, mirroring the real ffmpeg behavior.
+    """
+
+    exit_code = 0
+    exit_after_polls = 0
+    stderr_text = ""
+    records: ClassVar[list] = []
+
+    def __init__(self, cmd, **kwargs):
+        type(self).records.append((cmd, kwargs))
+        self.cmd = cmd
+        self._polls = 0
+        self.returncode = None
+        self.terminated = False
+        self.killed = False
+        if self.stderr_text:
+            kwargs["stderr"].write(self.stderr_text)
+            kwargs["stderr"].flush()
+
+    def poll(self):
+        if self._polls >= type(self).exit_after_polls:
+            self.returncode = type(self).exit_code
+        self._polls += 1
+        return self.returncode
+
+    def wait(self, timeout=None):
+        self.returncode = type(self).exit_code
+        return self.returncode
+
+    def terminate(self):
+        self.terminated = True
+
+    def kill(self):
+        self.killed = True
+
+
+class TestProbeLoudness:
+    _JSON = (
+        '{"input_i":"-13.4","input_tp":"-1.2","input_lra":"6.3",'
+        '"input_thresh":"-23.1","target_offset":"0.4"}'
+    )
+
+    def _patch(self, monkeypatch, *, exit_code=0, exit_after_polls=0,
+               stderr_text=""):
+        _FakeScanPopen.exit_code = exit_code
+        _FakeScanPopen.exit_after_polls = exit_after_polls
+        _FakeScanPopen.stderr_text = stderr_text
+        _FakeScanPopen.records.clear()
+        monkeypatch.setattr("subprocess.Popen", _FakeScanPopen, raising=False)
+        return _FakeScanPopen
+
+    def test_parses_measured_json_and_skips_video(self, monkeypatch):
+        self._patch(
+            monkeypatch,
+            stderr_text=f"noise above\n{self._JSON}\nnoise below\n",
+        )
+        processes = []
+
+        result = probe_loudness(
+            "/bin/ffmpeg", Path("song.mp3"), -14.0, -1.0, 11.0,
+            set_process=processes.append,
+        )
+
+        assert result == {
+            "input_i": "-13.4", "input_tp": "-1.2", "input_lra": "6.3",
+            "input_thresh": "-23.1", "target_offset": "0.4",
+        }
+        assert processes[0] is not None and processes[1] is None
+        cmd = _FakeScanPopen.records[0][0]
+        # -vn keeps the scan from decoding the video stream
+        assert "-vn" in cmd
+        assert "print_format=json" in cmd[cmd.index("-af") + 1]
+
+    def test_cancel_terminates_scan_and_raises(self, monkeypatch):
+        # A huge poll budget means the scan never finishes on its own
+        self._patch(monkeypatch, exit_after_polls=10**9)
+        processes = []
+
+        with pytest.raises(RuntimeError, match="Cancelled"):
+            probe_loudness(
+                "/bin/ffmpeg", Path("song.mp3"), -14.0, -1.0, 11.0,
+                cancelled=lambda: True,
+                set_process=processes.append,
+            )
+
+        assert processes[0].terminated is True
+        assert processes[1] is None  # tracking cleared even on cancel
+
+    def test_timeout_kills_scan_and_raises(self, monkeypatch):
+        self._patch(monkeypatch, exit_after_polls=10**9)
+        processes = []
+
+        with pytest.raises(RuntimeError, match="timed out"):
+            probe_loudness(
+                "/bin/ffmpeg", Path("song.mp3"), -14.0, -1.0, 11.0,
+                timeout=1,
+                set_process=processes.append,
+            )
+
+        assert processes[0].killed is True
+        assert processes[1] is None
+
+    def test_nonzero_exit_raises_readable_error(self, monkeypatch):
+        self._patch(monkeypatch, exit_code=1, stderr_text="boom\n")
+
+        with pytest.raises(RuntimeError, match="loudnorm scan failed"):
+            probe_loudness(
+                "/bin/ffmpeg", Path("song.mp3"), -14.0, -1.0, 11.0,
+            )
+
+    def test_raises_when_no_json_in_output(self, monkeypatch):
+        self._patch(monkeypatch, stderr_text="nothing here\n")
+
+        with pytest.raises(RuntimeError, match="no JSON"):
+            probe_loudness(
+                "/bin/ffmpeg", Path("song.mp3"), -14.0, -1.0, 11.0,
+            )
+
+
 # -- run_ffmpeg_with_progress ------------------------------------------------
 
 class _FakePopen:
     """Stand-in for subprocess.Popen that yields canned -progress output."""
 
     exit_code = 0
-    lines: list[str] = []
-    records: list = []
+    lines: ClassVar[list[str]] = []
+    records: ClassVar[list] = []
 
     def __init__(self, cmd, **kwargs):
         type(self).records.append((cmd, kwargs))
@@ -263,7 +395,7 @@ class TestRunFfmpegWithProgress:
         assert progress == []
 
     def test_cancel_terminates_process_and_raises(self, monkeypatch):
-        fake = self._patch_popen(monkeypatch, ["out_time_ms=50000000\n"])
+        self._patch_popen(monkeypatch, ["out_time_ms=50000000\n"])
         progress, processes = [], []
 
         with pytest.raises(RuntimeError, match="Cancelled"):

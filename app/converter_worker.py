@@ -17,7 +17,6 @@ from .ffmpeg_utils import (
     run_ffmpeg_with_progress,
 )
 
-
 # ---------------------------------------------------------------------------
 # Constants (re-exported for external callers / window.py)
 # ---------------------------------------------------------------------------
@@ -98,6 +97,13 @@ class ConvertWorker(CancellableWorker):
         if self._process and self._process.poll() is None:
             self._process.terminate()
 
+    def _set_process(self, proc: subprocess.Popen[str] | None) -> None:
+        """Track the active ffmpeg process so cancel() can terminate it.
+
+        Shared by the loudness scan and the conversion passes.
+        """
+        self._process = proc
+
     # ------------------------------------------------------------------
     # QThread entry point
     # ------------------------------------------------------------------
@@ -129,7 +135,7 @@ class ConvertWorker(CancellableWorker):
                 self.progress.emit(100)
                 self.finished_ok.emit(str(out_path))
 
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 — run() boundary: report any failure
             if self._cancelled:
                 self.status.emit("Cancelled.")
             else:
@@ -169,7 +175,7 @@ class ConvertWorker(CancellableWorker):
         if loudnorm_apply:
             filters.append(loudnorm_apply)
         elif self.norm_mode == "peak":
-            filters.append(f"dynaudnorm=p=0.9:m=100:s=12")
+            filters.append("dynaudnorm=p=0.9:m=100:s=12")
             filters.append(f"volume={self.peak_target}dB")
 
         return filters
@@ -252,6 +258,9 @@ class ConvertWorker(CancellableWorker):
             default_lufs=DEFAULT_LUFS,
             default_true_peak=DEFAULT_TRUE_PEAK,
             default_lra=DEFAULT_LRA,
+            timeout=max(300, int(self.duration or 0)),
+            cancelled=lambda: self._cancelled,
+            set_process=self._set_process,
         )
         self.progress.emit(40)
 
@@ -283,9 +292,6 @@ class ConvertWorker(CancellableWorker):
         Delegates to ffmpeg_utils.run_ffmpeg_with_progress, threading the
         Popen object through self._process so cancel() can terminate it.
         """
-        def _set_process(proc: subprocess.Popen[str] | None) -> None:
-            self._process = proc
-
         run_ffmpeg_with_progress(
             cmd,
             duration=self.duration,
@@ -293,7 +299,7 @@ class ConvertWorker(CancellableWorker):
             on_progress=lambda pct: self.progress.emit(pct),
             progress_floor=progress_floor,
             progress_ceiling=progress_ceiling,
-            set_process=_set_process,
+            set_process=self._set_process,
         )
 
 
@@ -333,6 +339,10 @@ class VideoConvertWorker(CancellableWorker):
         if self._process and self._process.poll() is None:
             self._process.terminate()
 
+    def _set_process(self, proc: subprocess.Popen[str] | None) -> None:
+        """Track the active ffmpeg process so cancel() can terminate it."""
+        self._process = proc
+
     def run(self) -> None:
         try:
             ffmpeg = find_ffmpeg()
@@ -366,7 +376,7 @@ class VideoConvertWorker(CancellableWorker):
             else:
                 self.progress.emit(100)
                 self.finished_ok.emit(str(out_path))
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 — run() boundary: report any failure
             if self._cancelled:
                 self.status.emit("Cancelled.")
             else:
@@ -408,9 +418,6 @@ class VideoConvertWorker(CancellableWorker):
         maps ffmpeg progress onto the 10-90 range (leaving 0-10 and 90-100 as
         status/complete headroom in the caller).
         """
-        def _set_process(proc: subprocess.Popen[str] | None) -> None:
-            self._process = proc
-
         run_ffmpeg_with_progress(
             cmd,
             duration=self.duration,
@@ -418,5 +425,5 @@ class VideoConvertWorker(CancellableWorker):
             on_progress=lambda pct: self.progress.emit(pct),
             progress_floor=10,
             progress_ceiling=90,
-            set_process=_set_process,
+            set_process=self._set_process,
         )

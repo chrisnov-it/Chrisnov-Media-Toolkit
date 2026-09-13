@@ -8,13 +8,13 @@ including the corrected yt-dlp option keys (cookiefile / cookiesfrombrowser).
 import sys
 
 from app.yt_dlp_opts import (
+    _extra_postprocessors,
+    _thumbnail_supported,
     build_cookie_opts,
     build_dry_opts,
     build_format_opts,
-    _extra_postprocessors,
-    _thumbnail_supported,
+    is_playlist_url,
 )
-
 
 # -- build_cookie_opts -------------------------------------------------------
 
@@ -82,11 +82,11 @@ class TestExtraPostprocessors:
 # -- build_format_opts -------------------------------------------------------
 
 def _audio_opts(**kw):
-    base = dict(
-        audio_only=True, height=None, container="mp3", bitrate=192,
-        embed_metadata=False, embed_thumbnail=False, outdir="/out",
-        archive_path=None, playlist=False,
-    )
+    base = {
+        "audio_only": True, "height": None, "container": "mp3", "bitrate": 192,
+        "embed_metadata": False, "embed_thumbnail": False, "outdir": "/out",
+        "archive_path": None, "playlist": False,
+    }
     base.update(kw)
     return build_format_opts(**base)
 
@@ -162,4 +162,46 @@ class TestBuildDryOpts:
         f.write_text("x")
         opts = build_dry_opts(False, str(f), False)
         assert opts["cookiefile"] == str(f)
+
+
+# -- is_playlist_url ---------------------------------------------------------
+
+class TestIsPlaylistUrl:
+    def test_youtube_watch_with_list_is_single_video(self):
+        # A video opened from inside a playlist page — must NOT fetch the playlist
+        assert is_playlist_url("https://www.youtube.com/watch?v=abc123&list=PLxyz") is False
+
+    def test_youtube_playlist_page(self):
+        assert is_playlist_url("https://www.youtube.com/playlist?list=PLxyz") is True
+
+    def test_bare_youtube_host_playlist(self):
+        assert is_playlist_url("https://youtube.com/playlist?list=PLxyz") is True
+
+    def test_youtu_be_video_with_list(self):
+        assert is_playlist_url("https://youtu.be/abc123?list=PLxyz") is False
+
+    def test_music_youtube_watch_with_list(self):
+        assert is_playlist_url("https://music.youtube.com/watch?v=abc123&list=RDxyz") is False
+
+    def test_music_youtube_playlist_page(self):
+        assert is_playlist_url("https://music.youtube.com/playlist?list=RDxyz") is True
+
+    def test_watch_without_list(self):
+        assert is_playlist_url("https://www.youtube.com/watch?v=abc123") is False
+
+    def test_param_order_reversed(self):
+        assert is_playlist_url("https://www.youtube.com/watch?list=PLxyz&v=abc123") is False
+
+    def test_vimeo_album_with_list(self):
+        # Non-YouTube hosts keep the legacy list= heuristic
+        assert is_playlist_url("https://vimeo.com/album/1?list=x") is True
+
+    def test_vimeo_plain_video(self):
+        assert is_playlist_url("https://vimeo.com/123456") is False
+
+    def test_unknown_host_ignored(self):
+        assert is_playlist_url("https://example.com/watch?v=abc&list=PLxyz") is False
+
+    def test_no_host(self):
+        assert is_playlist_url("not a url") is False
 

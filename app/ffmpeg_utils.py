@@ -13,9 +13,8 @@ import subprocess
 import sys
 import tempfile
 import time
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable
-
 
 # ---------------------------------------------------------------------------
 # Binary discovery
@@ -23,12 +22,16 @@ from typing import Callable
 
 def find_binary(name: str) -> str:
     """Return path to a binary, preferring PyInstaller bundled bin/, then
-    project-local bin/, then system PATH.
+    a bin/ folder next to the frozen executable, then project-local bin/,
+    then system PATH.
 
     Resolution order:
       1. PyInstaller temp dir (sys._MEIPASS/bin/)
-      2. Project-local bin/ folder
-      3. System PATH
+      2. Next to the frozen executable (bin/ folder beside the exe —
+         used when the NSIS installer adds its optional FFmpeg component,
+         or for a portable exe+bin layout)
+      3. Project-local bin/ folder (dev/source runs)
+      4. System PATH
     """
     ext = ".exe" if sys.platform == "win32" else ""
 
@@ -38,12 +41,18 @@ def find_binary(name: str) -> str:
         if bundled.exists():
             return str(bundled)
 
-    # 2. Project-local bin/ folder
+    # 2. bin/ folder next to the frozen executable
+    if getattr(sys, "frozen", False):
+        beside_exe = Path(sys.executable).resolve().parent / "bin" / f"{name}{ext}"
+        if beside_exe.exists():
+            return str(beside_exe)
+
+    # 3. Project-local bin/ folder
     local = Path(__file__).resolve().parent.parent / "bin" / f"{name}{ext}"
     if local.exists():
         return str(local)
 
-    # 3. System PATH
+    # 4. System PATH
     system = shutil.which(name)
     if system:
         return system
@@ -76,7 +85,7 @@ def probe_duration(ffprobe: str, src: Path) -> float | None:
         "-of", "default=noprint_wrappers=1:nokey=1",
         str(src),
     ]
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=30, check=False)
     if result.returncode != 0:
         return None
     try:
@@ -86,23 +95,82 @@ def probe_duration(ffprobe: str, src: Path) -> float | None:
     return duration if duration > 0 else None
 
 
-def probe_loudness(ffmpeg: str, src: Path, default_lufs: float,
-                   default_true_peak: float, default_lra: float) -> dict:
-    """Run EBU R128 first-pass loudness scan. Returns loudnorm measured values."""
+def probe_loudness(
+    ffmpeg: str,
+    src: Path,
+    default_lufs: float,
+    default_true_peak: float,
+    default_lra: float,
+    timeout: int = 300,
+    *,
+    cancelled: Callable[[], bool] | None = None,
+    set_process: Callable[[subprocess.Popen[str] | None], None] | None = None,
+) -> dict:
+    """Run EBU R128 first-pass loudness scan. Returns loudnorm measured values.
+
+    -vn skips decoding the video stream (only the audio matters here), keeping
+    the scan fast for video files.
+
+    Runs via Popen with a poll loop instead of blocking subprocess.run so the
+    caller can cancel: when *cancelled* reports cancellation the ffmpeg
+    process is terminated (then killed if it ignores that) and
+    RuntimeError("Cancelled.") is raised — without this, a cancelled scan
+    would keep running as an orphan because cancel() could only set a flag.
+    Raises a readable RuntimeError when ffmpeg fails or the scan exceeds
+    *timeout* seconds.
+    """
     cmd = [
         ffmpeg, "-hide_banner", "-nostats",
         "-i", str(src),
+        "-vn",
         "-af", (
             f"loudnorm=I={default_lufs}:TP={default_true_peak}"
             f":LRA={default_lra}:print_format=json"
         ),
         "-f", "null", "-",
     ]
-    result = subprocess.run(
-        cmd, capture_output=True, text=True, timeout=300
-    )
-    # loudnorm prints JSON to stderr
-    stderr = result.stderr
+    deadline = time.monotonic() + timeout
+    # loudnorm prints its JSON summary to stderr; buffer it in a file so the
+    # process can never block on a full pipe.
+    with tempfile.TemporaryFile("w+", encoding="utf-8", errors="replace") as stderr_file:
+        process = subprocess.Popen(
+            cmd,
+            stdout=subprocess.DEVNULL,
+            stderr=stderr_file,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
+        if set_process is not None:
+            set_process(process)
+        try:
+            while process.poll() is None:
+                if cancelled is not None and cancelled():
+                    process.terminate()
+                    try:
+                        process.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        process.kill()
+                        process.wait()
+                    raise RuntimeError("Cancelled.")
+                if time.monotonic() > deadline:
+                    process.kill()
+                    process.wait()
+                    raise RuntimeError(
+                        f"Loudness scan timed out after {timeout}s "
+                        f"({src.name} may be very long, or storage too slow)."
+                    )
+                time.sleep(0.1)
+        finally:
+            if set_process is not None:
+                set_process(None)
+        stderr_file.seek(0)
+        stderr = stderr_file.read()
+        if process.returncode != 0:
+            raise RuntimeError(
+                f"loudnorm scan failed (exit {process.returncode}): "
+                f"{stderr[-500:]}"
+            )
     # Extract the JSON block from stderr
     match = re.search(r"\{[^{}]+\}", stderr, re.DOTALL)
     if not match:

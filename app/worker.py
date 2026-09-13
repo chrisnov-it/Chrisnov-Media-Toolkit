@@ -9,13 +9,13 @@ from PySide6.QtCore import Signal
 from yt_dlp import YoutubeDL
 
 from .base_worker import CancellableWorker
+from .constants import AUDIO_CONTAINERS, VIDEO_CONTAINERS
 from .yt_dlp_opts import (
+    _thumbnail_supported,
     build_cookie_opts,
     build_dry_opts,
     build_format_opts,
-    _thumbnail_supported,
 )
-from .constants import VIDEO_CONTAINERS, AUDIO_CONTAINERS
 
 
 class _CancelledError(Exception):
@@ -76,7 +76,7 @@ class DownloadWorker(CancellableWorker):
                 self.finished_ok.emit(saved)
         except _CancelledError:
             pass  # clean cancel — no error signal
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 — run() boundary: report any failure
             if not self._cancelled:
                 self.failed.emit(str(e))
 
@@ -147,7 +147,7 @@ class DownloadWorker(CancellableWorker):
 
         try:
             candidates.append(ydl.prepare_filename(entry))
-        except Exception:
+        except Exception:  # noqa: BLE001, S110 — best-effort extra candidate only
             pass
 
         for candidate in candidates:
@@ -214,7 +214,7 @@ class PlaylistInspectWorker(CancellableWorker):
             try:
                 with YoutubeDL(dry_opts) as ydl:
                     info = ydl.extract_info(p_url, download=False)
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001 — report fetch failure per URL
                 if not self._cancelled:
                     self.error.emit(p_url, str(exc))
                 return
@@ -293,6 +293,6 @@ class FileSizeWorker(CancellableWorker):
             self.result.emit(title, duration, filesize_mb, fmt_note or self.fmt,
                              self.audio_only, resolution)
 
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 — run() boundary: report any failure
             if not self._cancelled:
                 self.error.emit(str(exc))

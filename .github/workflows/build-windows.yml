@@ -5,9 +5,9 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Release version, for example 0.2.0-beta.2"
+        description: "Release version, for example 0.2.0-beta.3"
         required: true
-        default: "0.2.0-beta.2"
+        default: "0.2.0-beta.3"
   push:
     tags:
       - "v*"
@@ -38,7 +38,10 @@ jobs:
         run: |
           python -m venv .venv
           .\.venv\Scripts\python.exe -m pip install --upgrade pip
-          .\.venv\Scripts\python.exe -m pip install PySide6 yt-dlp pyinstaller==6.17.0 awscli
+          # curl_cffi: required for the impersonate option (Instagram/Vimeo
+          # private downloads with cookies). Must be installed at build time
+          # so PyInstaller bundles it into the executable.
+          .\.venv\Scripts\python.exe -m pip install PySide6 yt-dlp curl_cffi pyinstaller==6.17.0
 
       - name: Prepare build metadata
         shell: pwsh

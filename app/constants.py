@@ -1,6 +1,11 @@
 """UI constants — combobox option lists and presets."""
 
-APP_VERSION = "0.2.0-beta.2"
+from pathlib import Path
+
+APP_VERSION = "0.2.0-beta.3"
+
+# Per-user config dir: download history + skip-duplicates archives live here.
+CONFIG_DIR = Path.home() / ".config" / "chrisnov-media-toolkit"
 
 RES_PRESETS = [
     ("Best (no limit)", None),

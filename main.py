@@ -8,14 +8,21 @@ import ctypes
 import os
 from pathlib import Path
 
-# Put bundled/local bin directory in PATH so that both shutil.which and yt-dlp find ffmpeg/ffprobe
+# Put bundled/local bin directories in PATH so that both shutil.which and
+# yt-dlp find ffmpeg/ffprobe.
+#   - frozen app: binaries bundled inside the exe (PyInstaller _MEIPASS)
+#   - frozen app: bin/ folder next to the exe (NSIS optional FFmpeg component)
+#   - dev runs:   project-local bin/
+_bin_dirs: list[Path] = []
 if hasattr(sys, "_MEIPASS"):
-    bin_dir = Path(sys._MEIPASS) / "bin"
+    _bin_dirs.append(Path(sys._MEIPASS) / "bin")
+if getattr(sys, "frozen", False):
+    _bin_dirs.append(Path(sys.executable).resolve().parent / "bin")
 else:
-    bin_dir = Path(__file__).resolve().parent / "bin"
-
-if bin_dir.exists():
-    os.environ["PATH"] = str(bin_dir) + os.pathsep + os.environ.get("PATH", "")
+    _bin_dirs.append(Path(__file__).resolve().parent / "bin")
+for _bin_dir in _bin_dirs:
+    if _bin_dir.exists():
+        os.environ["PATH"] = str(_bin_dir) + os.pathsep + os.environ.get("PATH", "")
 
 from PySide6.QtWidgets import QApplication
 

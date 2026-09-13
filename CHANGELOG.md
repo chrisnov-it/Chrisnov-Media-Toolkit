@@ -4,13 +4,184 @@ All notable changes to this project are documented here.
 
 ---
 
-## [Unreleased]
+## [0.2.0-beta.3] — 2026-09-14
 
 ### Added
 
+- **Offscreen GUI smoke test** (`scripts/smoke_gui.py`)
+  A no-network regression net covering tab construction, URL-queue handling
+  (dedup, remove, clear, playlist labeling), history render/search/clear,
+  converter file lists, worker tracking, idle cancel guards, and Start
+  validation guards. Redirects HOME/XDG_CONFIG_HOME to a temp dir before any
+  Qt import so it never touches real user config. Run with
+  `QT_QPA_PLATFORM=offscreen .venv/bin/python scripts/smoke_gui.py`.
+
+- **Unit tests for the download-history model** (`tests/test_history.py`)
+  Covers load (missing/corrupt/wrong-version/valid), legacy playlist-payload
+  sanitization, newest-first append + persistence, nested parent-dir creation,
+  entry capping, and clear.
+
 ### Changed
 
+- **`MainWindow` split into one module per tab** (`app/window.py` + new `app/download_tab.py`, `app/convert_tab.py`, `app/video_convert_tab.py`, `app/history_tab.py`)
+  The former 2000-line monolith is now a thin shell (~400 lines) owning only
+  the tab layout, drag-and-drop routing, theme changes, and the About dialog.
+  Each tab is its own widget with its own `WorkerTracker`; cross-tab coupling
+  goes through explicit public APIs (`is_active`, `add_url`, `add_folder`,
+  `requeue`, `clean_tags_text`, `history_changed` / `requeue_requested` signals).
+  Downloader batch state is consolidated into a `BatchState` dataclass
+  replacing the lazily-set attributes and their `getattr()` fallbacks; Start
+  validation now runs before any state is built so early returns can't leave a
+  half-initialized batch behind. Extracted shared leaves: `AppSettings`
+  (`app/settings.py`, typed QSettings accessors), `DownloadHistory`
+  (`app/history.py`, Qt-free versioned-JSON model), `WorkerTracker`
+  (`app/worker_tracking.py`), `open_in_explorer` (`app/utils.py`), `CONFIG_DIR`
+  (`app/constants.py`). Behavior is unchanged — widget and handler names are
+  identical, guarded by the new smoke test.
+
+- **Lint and annotation hygiene: project ruff baseline from 30 findings to zero**
+  Extraneous f-string prefixes in `cleaner.py` and `converter_worker.py`,
+  import ordering across eight files, `typing.Callable` →
+  `collections.abc.Callable` in `ffmpeg_utils.py`, a needless bool in
+  `is_playlist_url()`, a misnumbered step comment in `find_binary()`, and
+  mutable class defaults / unused unpacks / a `dict()` call in the test
+  suite. The intentional catch-all `except Exception` guards at every
+  worker `run()` boundary — which exist to route *any* failure into the
+  failed/error signal — are kept and marked with justified `noqa`
+  comments instead of being narrowed, since narrowing could let new
+  exception types escape uncaught and crash the worker thread.
+
 ### Fixed
+
+- **Worker threads could be destroyed mid-shutdown or lingered after use** (`app/window.py`)
+  All five worker types (download, playlist inspect, info, audio convert,
+  video convert) are parentless QThreads owned by Python: the moment the
+  last reference disappears, the C++ object is deleted immediately — but
+  completion handlers fire *inside* run(), before the thread has exited,
+  so dropping the last reference there (`self.worker = None`, or
+  overwriting the attribute with the next worker) could destroy a QThread
+  still winding down ("QThread: Destroyed while thread is still running").
+  Every worker is now pinned in a tracked set from creation (attribute
+  writes are unconditionally safe) and released via finished →
+  deleteLater → destroyed right after its thread exits. `self.worker` is
+  also initialized in `__init__` and cleared at batch end, replacing the
+  fragile `hasattr()` guard.
+
+- **Single video with a `list=` parameter downloaded the whole playlist** (`app/yt_dlp_opts.py`, `app/window.py`)
+  Pasting a video URL opened from inside a playlist page
+  (`youtube.com/watch?v=X&list=Y`) was classified as a full playlist: the
+  queue showed a playlist label, a slow size inspection with confirmation
+  dialog ran, and the download fetched every playlist entry instead of the
+  one video. Playlist detection now actually parses YouTube URLs — only
+  `playlist?list=` URLs are playlists; `watch?v=`/`youtu.be/ID` URLs that
+  merely carry a `list=` parameter download exactly that one video
+  (`noplaylist=True`). Non-YouTube hosts keep the existing behavior.
+
+- **Loudness scan decoded video streams and hung on long files** (`app/ffmpeg_utils.py`, `app/converter_worker.py`)
+  `probe_loudness()` ran the EBU R128 first pass without `-vn`, so measuring
+  a video file decoded its entire video stream just to read audio loudness
+  — the audio conversion itself already used `-vn`, making the scan the
+  slowest step by far. The scan now skips video, checks ffmpeg's exit code
+  (clear error messages instead of a bare "no JSON in output"), raises a
+  readable RuntimeError on timeout instead of a raw `TimeoutExpired`
+  traceback, and its timeout scales with the file's duration
+  (at least 300s) so long podcasts/audiobooks don't hit a false ceiling.
+
+- **`MainWindow.height` shadowed the inherited `QWidget.height()` method** (`app/window.py`)
+  The downloader's resolution setting was stored as `self.height`, which
+  shadows Qt's built-in `height()` method — harmless at runtime because it
+  is always assigned before use, but fragile and confusing for static
+  analysis (caught by the project-wide diagnostics sweep). Renamed to
+  `self.dl_height` and initialized in `__init__`.
+
+- **Impersonation missing from CI-built executables** (`.github/workflows/*`, `chrisnov-media-toolkit.spec`)
+  The three build workflows did not install `curl_cffi`, so released binaries
+  hit the guarded ImportError in `build_cookie_opts()` and silently shipped
+  without Chrome impersonation — breaking browser-cookie downloads for
+  Instagram/Vimeo private in every CI build (local builds were unaffected).
+  All workflows now install `curl_cffi` and drop the leftover `awscli` from
+  the removed R2 upload step; the PyInstaller spec also lists `curl_cffi` in
+  `hiddenimports` so it is always bundled.
+
+- **Cancel race in the converter tabs** (`app/window.py`)
+  `_conv_cancel()` and `_video_conv_cancel()` now disconnect the worker's
+  signals before cancelling (mirroring `_cancel_download()`). Previously, a
+  `finished_ok`/`failed` signal still in flight when Cancel was clicked could
+  arrive after the UI reset, calling `_conv_kick_next()` and starting the
+  next file's conversion even though the user had cancelled.
+
+- **Queue changes during a running batch were silently discarded** (`app/window.py`)
+  Drag-and-drop, the converter's Files/Folder/Remove/Clear buttons, and the
+  downloader's Remove/Clear all stayed active while a batch was running, but
+  additions never reached the running snapshot and were wiped by the queue
+  reset. Dropped URLs/files during an active batch now get an explanatory
+  dialog, the queue-editing buttons are disabled while a batch runs, and a
+  history re-queue during a download leaves the URL in the input box to add
+  after the queue finishes.
+
+- **Windows installer script was broken in three ways** (`installer.nsi`, `app/ffmpeg_utils.py`, `main.py`)
+  `installer.nsi` could not compile at all: `MUI_PAGE_WELCOME` was inserted
+  twice, the mandatory license page referenced a `LICENSE` file that does not
+  exist in the repo, and the `File` command pointed at
+  `dist\chrisnov-media-toolkit.exe` — an artifact the build never produces
+  (the spec outputs `-lite.exe` / `-bundled.exe`). The optional FFmpeg
+  component also installed into a `bin\` folder the frozen app never
+  looked in. The script now compiles (single welcome page, license page only
+  when built with `-DPRODUCT_LICENSE=<file>`, version overridable with
+  `-DPRODUCT_VERSION=<x>`), packages the actual Lite build under a stable
+  installed name, drops the dead `icon.svg` install (the icon is already
+  embedded in the exe), and the optional FFmpeg component genuinely works:
+  `find_binary()` and the PATH setup in `main.py` now also search a `bin\`
+  folder placed next to the frozen executable.
+
+- **Playlist history entries stored raw worker payloads as the filename** (`app/window.py`)
+  Completed playlist downloads recorded their internal payload string
+  (e.g. `playlist_files:["C:\\...\\song1.mp3", ...]`) as the history `filename`,
+  so the History tab showed a wall of JSON paths with a `0 B` size, and
+  double-clicking a playlist entry opened the *parent* of the output
+  folder. Playlist entries now store a readable label
+  (`Playlist — 12 file(s)` or `Playlist: <title> — 5 item(s)`) together with
+  the real total size of the downloaded files; double-clicking opens the
+  output folder itself. Legacy entries with payload filenames are rewritten
+  to a plain "Playlist" label on load.
+
+- **Cancel during the EBU R128 loudness scan left ffmpeg running as an orphan** (`app/ffmpeg_utils.py`, `app/converter_worker.py`)
+  The first-pass loudness scan ran via blocking `subprocess.run`, which the
+  converter's cancel path could not terminate — cancel() could only set a
+  flag, so cancelling mid-scan made the UI hard-terminate the QThread while
+  the ffmpeg scan kept running with nobody waiting on it. `probe_loudness()`
+  now runs via `Popen` with a poll loop that checks the worker's cancelled
+  flag every 100 ms (mirroring `run_ffmpeg_with_progress`): the scan
+  process is registered with the worker so `cancel()` terminates it
+  directly, the poll loop terminates → waits → kills if the process ignores
+  SIGTERM, and the same `RuntimeError("Cancelled.")` the conversion passes
+  use propagates cleanly. The loudnorm JSON is buffered to a temp file, so
+  the scan can also never block on a full stderr pipe. The old
+  `subprocess.run`-based unit tests were ported to the new interface, plus
+  new tests for the cancel, timeout-kill, and missing-JSON paths.
+
+- **Deprecated Qt 5 enum/attribute access in the theming module** (`app/theme.py`)
+  `QPalette.Window`-style shorthand is superseded by the scoped
+  `QPalette.ColorRole.*` form, and the two HiDPI application attributes
+  enabled at startup (`AA_EnableHighDpiScaling` / `AA_UseHighDpiPixmaps`)
+  are deprecated no-ops in Qt 6 that newer PySide6 stubs stop exposing —
+  together these were the last genuine (non-stub) pyright errors in the
+  project. The shorthand accesses are now scoped properly,
+  `widget_stylesheet()` reads the palette via the static
+  `QGuiApplication.palette()` (no instance lookup needed), and the HiDPI
+  attributes are only set when they still exist, so the call site in
+  `main.py` stays valid on any Qt version.
+
+### Removed
+
+- **Dead theming helpers** (`app/theme.py`)
+  `is_dark_mode()` — whose "modern" Qt 6.5 check read
+  `app.property("colorScheme")`, a property Qt never sets, so it always
+  fell through to the palette heuristic — and `refresh_palette()` were never
+  called from anywhere (the UI adapts to Light/Dark Mode purely through the
+  palette-driven `widget_stylesheet()` re-applied in `changeEvent()`).
+  Both were removed along with the unused `_is_dark_palette()` helper and the
+  unused `QColor` import.
 
 ---
 

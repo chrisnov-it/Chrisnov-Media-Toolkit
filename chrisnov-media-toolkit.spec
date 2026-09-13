@@ -40,6 +40,10 @@ a = Analysis(
         # yt-dlp extractor plugins are loaded dynamically — tell PyInstaller about them
         'yt_dlp.extractor',
         'yt_dlp.postprocessor',
+        # curl_cffi backs the impersonate option (guarded try/except import in
+        # app/yt_dlp_opts.py); keep it explicit so released binaries always
+        # bundle it even if static analysis ever misses the guarded import.
+        'curl_cffi',
         # PySide6 platform plugins
         'PySide6.QtSvg',
         'PySide6.QtSvgWidgets',

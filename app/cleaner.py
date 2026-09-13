@@ -64,16 +64,16 @@ def clean_title(title: str, tags: list[str]) -> str:
     for tag in sorted_tags:
         t = re.escape(tag)
         # 1. Fully bracketed: [tag], (tag), [some tag], (some tag)
-        bracket_pat = rf"[\[\(][^\[\]\(\)]*?" + t + r"[^\[\]\(\)]*?[\]\)]"
+        bracket_pat = r"[\[\(][^\[\]\(\)]*?" + t + r"[^\[\]\(\)]*?[\]\)]"
         result = re.sub(bracket_pat, " ", result, flags=re.IGNORECASE)
         # 2. Unclosed bracket at end: (tag  or  [tag  (no closing bracket)
-        unclosed_pat = rf"[\[\(][^\[\]\(\)]*?" + t + r"[^\[\]\(\)]*?\s*$"
+        unclosed_pat = r"[\[\(][^\[\]\(\)]*?" + t + r"[^\[\]\(\)]*?\s*$"
         result = re.sub(unclosed_pat, " ", result, flags=re.IGNORECASE)
         # 3. Opener without closing at the start/middle: capture up to end or next opener
-        unclosed_mid = rf"[\[\(][^\[\]\(\)]*?" + t + r"[^\[\]\(\)]*?"
+        unclosed_mid = r"[\[\(][^\[\]\(\)]*?" + t + r"[^\[\]\(\)]*?"
         result = re.sub(unclosed_mid, " ", result, flags=re.IGNORECASE)
         # 4. Bare tag (surrounded by whitespace / separators)
-        bare_pat = rf"(?:^|[\s\-|])(?:" + t + r")(?:[\s\-|]|$)"
+        bare_pat = r"(?:^|[\s\-|])(?:" + t + r")(?:[\s\-|]|$)"
         result = re.sub(bare_pat, " ", result, flags=re.IGNORECASE)
         # 5. Plain fallback — any remaining occurrence of the raw tag text
         result = re.sub(t, " ", result, flags=re.IGNORECASE)

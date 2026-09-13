@@ -19,21 +19,25 @@ Usage in window.py:
 from __future__ import annotations
 
 import sys
+
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QColor, QPalette
+from PySide6.QtGui import QPalette
 
 
 def enable_high_dpi() -> None:
     """Enable HiDPI screen scaling before QApplication is created.
 
-    On macOS (especially older MacBook Air 2015), PySide6 may not
-    auto-detect the Retina DPI factor. These attributes force proper
-    scaling so that font-size: 9pt renders at a readable physical size.
+    Qt 6 always enables High-DPI scaling and High-DPI pixmaps — the two Qt 5
+    application attributes are deprecated no-ops there and newer PySide6
+    stubs stop exposing them, so each attribute is only set when it still
+    exists. Keeps the call site in main.py valid on any Qt version.
     """
     # Must be set before QApplication is instantiated
     from PySide6.QtWidgets import QApplication
-    QApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)
-    QApplication.setAttribute(Qt.AA_UseHighDpiPixmaps, True)
+    for attr_name in ("AA_EnableHighDpiScaling", "AA_UseHighDpiPixmaps"):
+        attr = getattr(Qt.ApplicationAttribute, attr_name, None)
+        if attr is not None:
+            QApplication.setAttribute(attr, True)
 
 
 def _base_font_size() -> str:
@@ -57,51 +61,6 @@ def _font_family() -> str:
     if sys.platform == "win32":
         return "\"Segoe UI\", \"Noto Sans\", Arial, sans-serif"
     return "\"Noto Sans\", \"Segoe UI\", Arial, sans-serif"  # Linux
-
-
-def _is_dark_palette(palette: QPalette) -> bool:
-    """Detect whether the given palette is a dark theme.
-
-    Qt 6.5+ exposes palette.color(QPalette.ColorGroup.Active, QPalette.Window).lighter().value()
-    We use the window background brightness as a heuristic.
-
-    Wraps in try/except because palette.color() can fail with SystemError
-    during PaletteChange events when the palette is mid-update.
-    """
-    try:
-        window_color = palette.color(QPalette.ColorGroup.Active, QPalette.Window)
-        # .value() returns the HSV value (brightness) — 0 = black, 255 = white
-        return window_color.value() < 128
-    except (SystemError, RuntimeError, ValueError):
-        return False
-
-
-def is_dark_mode(palette: QPalette | None = None) -> bool:
-    """Detect whether the system/app is in Dark Mode.
-
-    Checks:
-    1. Qt's ColorScheme (Qt 6.5+, the modern way)
-    2. The palette window color brightness (fallback)
-    """
-    from PySide6.QtGui import QGuiApplication
-    app = QGuiApplication.instance()
-    if app is not None:
-        # Qt 6.5+ way — checks the system appearance
-        try:
-            scheme = app.property("colorScheme")
-            if scheme == "dark":
-                return True
-            if scheme == "light":
-                return False
-        except Exception:
-            pass
-
-    if palette is not None:
-        return _is_dark_palette(palette)
-
-    if app is not None:
-        return _is_dark_palette(app.palette())
-    return False
 
 
 def global_stylesheet() -> str:
@@ -153,23 +112,20 @@ def widget_stylesheet(palette: QPalette | None = None) -> str:
     - Midlight / Dark              → borders and dividers
     """
     from PySide6.QtGui import QGuiApplication
-    app = QGuiApplication.instance()
     if palette is None:
-        palette = app.palette() if app is not None else QPalette()
+        palette = QGuiApplication.palette()  # static: app palette, no instance needed
 
-    dark = _is_dark_palette(palette)
-
-    window = _palette_color(palette, QPalette.Window)
-    window_text = _palette_color(palette, QPalette.WindowText)
-    base = _palette_color(palette, QPalette.Base)
-    text = _palette_color(palette, QPalette.Text)
-    highlight = _palette_color(palette, QPalette.Highlight)
-    highlighted_text = _palette_color(palette, QPalette.HighlightedText)
-    button = _palette_color(palette, QPalette.Button)
-    button_text = _palette_color(palette, QPalette.ButtonText)
-    mid = _palette_color(palette, QPalette.Mid)
-    midlight = _palette_color(palette, QPalette.Midlight)
-    dark_role = _palette_color(palette, QPalette.Dark)
+    window = _palette_color(palette, QPalette.ColorRole.Window)
+    window_text = _palette_color(palette, QPalette.ColorRole.WindowText)
+    base = _palette_color(palette, QPalette.ColorRole.Base)
+    text = _palette_color(palette, QPalette.ColorRole.Text)
+    highlight = _palette_color(palette, QPalette.ColorRole.Highlight)
+    highlighted_text = _palette_color(palette, QPalette.ColorRole.HighlightedText)
+    button = _palette_color(palette, QPalette.ColorRole.Button)
+    button_text = _palette_color(palette, QPalette.ColorRole.ButtonText)
+    mid = _palette_color(palette, QPalette.ColorRole.Mid)
+    midlight = _palette_color(palette, QPalette.ColorRole.Midlight)
+    dark_role = _palette_color(palette, QPalette.ColorRole.Dark)
 
     fs = _base_font_size()
     ff = _font_family()
@@ -300,12 +256,3 @@ QPushButton#aboutButton:hover {{
     background: {mid};
 }}
 """
-
-
-def refresh_palette() -> str:
-    """Re-apply the palette-aware stylesheet after a theme change.
-
-    Call this from a QEvent.ColorSchemeChange handler or after
-    QGuiApplication.setPalette() to update all widgets.
-    """
-    return widget_stylesheet()
