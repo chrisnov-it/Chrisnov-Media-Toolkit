@@ -31,7 +31,3 @@
 - [ ] Code follows the existing style (typed, no new dependencies)
 - [ ] CHANGELOG.md updated (if user-facing change)
 - [ ] Commit messages follow conventional commits
-
----
-
-🤖 Generated with [Claude Code](https://claude.com/claude-code)
