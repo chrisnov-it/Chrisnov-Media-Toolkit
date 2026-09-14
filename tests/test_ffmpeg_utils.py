@@ -18,6 +18,7 @@ from app.ffmpeg_utils import (
     find_ffprobe,
     probe_duration,
     probe_loudness,
+    probe_version,
     resolve_output_path,
     run_ffmpeg_with_progress,
 )
@@ -131,6 +132,47 @@ class TestProbeDuration:
             lambda *a, **k: SimpleNamespace(returncode=0, stdout="0\n"),
         )
         assert probe_duration("/bin/ffprobe", Path("/tmp/x.mp3")) is None
+
+
+# -- probe_version ------------------------------------------------------------
+
+class TestProbeVersion:
+    def test_reads_banner_from_stdout(self, monkeypatch):
+        # The banner goes to stdout — this is exactly the bug the old About
+        # dialog had (it read stderr and always showed "n/a").
+        monkeypatch.setattr(
+            "subprocess.run",
+            lambda *a, **k: SimpleNamespace(
+                returncode=0,
+                stdout=("ffmpeg version 6.1.1-3ubuntu5 Copyright (c) 2000-2023\n"
+                        "built with gcc 13\n"),
+                stderr="",
+            ),
+        )
+        assert probe_version("/usr/bin/ffmpeg") == "6.1.1-3ubuntu5"
+
+    def test_returns_none_when_binary_missing(self, monkeypatch):
+        def boom(*a, **k):
+            raise FileNotFoundError("no such binary")
+
+        monkeypatch.setattr("subprocess.run", boom)
+        assert probe_version("/nope/ffmpeg") is None
+
+    def test_returns_none_on_nonzero_exit(self, monkeypatch):
+        monkeypatch.setattr(
+            "subprocess.run",
+            lambda *a, **k: SimpleNamespace(returncode=1, stdout="", stderr=""),
+        )
+        assert probe_version("/usr/bin/ffmpeg") is None
+
+    def test_returns_none_when_no_banner(self, monkeypatch):
+        monkeypatch.setattr(
+            "subprocess.run",
+            lambda *a, **k: SimpleNamespace(
+                returncode=0, stdout="unrelated text\n", stderr="",
+            ),
+        )
+        assert probe_version("/usr/bin/ffmpeg") is None
 
 # -- resolve_output_path ------------------------------------------------------
 

@@ -77,6 +77,26 @@ def find_ffprobe() -> str:
 # Probing
 # ---------------------------------------------------------------------------
 
+def probe_version(binary: str) -> str | None:
+    """Return the binary's version string (e.g. "6.1.1-3ubuntu5"), or None.
+
+    `ffmpeg -version` / `ffprobe -version` print their banner to *stdout*
+    (stderr only carries runtime logs), so that is where the version is
+    read from. Returns None when the binary is missing, fails, or prints
+    no recognizable banner.
+    """
+    try:
+        result = subprocess.run(
+            [binary, "-version"],
+            capture_output=True, text=True, timeout=5, check=False,
+        )
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+        return None
+    if result.returncode != 0:
+        return None
+    match = re.search(r"version (\S+)", result.stdout)
+    return match.group(1) if match else None
+
 def probe_duration(ffprobe: str, src: Path) -> float | None:
     """Return media duration in seconds, or None if ffprobe cannot determine it."""
     cmd = [

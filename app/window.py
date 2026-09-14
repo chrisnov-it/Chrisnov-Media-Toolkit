@@ -39,6 +39,7 @@ from PySide6.QtWidgets import (
 from .constants import APP_VERSION, CONFIG_DIR
 from .convert_tab import AudioConverterTab
 from .download_tab import DownloadTab
+from .ffmpeg_utils import find_ffmpeg, find_ffprobe, probe_version
 from .history import DownloadHistory
 from .history_tab import HistoryTab
 from .settings import AppSettings
@@ -250,7 +251,6 @@ class MainWindow(QWidget):
     def _show_about(self) -> None:
         """Show the About dialog with version, runtime, and dependency info."""
         import importlib.metadata as meta
-        import subprocess
 
         def _ver(pkg: str) -> str:
             try:
@@ -259,20 +259,22 @@ class MainWindow(QWidget):
                 return "n/a"
 
         def _ffmpeg_ver() -> str:
-            """Get FFmpeg version from ffmpeg or ffprobe binary."""
-            for cmd in ("ffmpeg", "ffprobe"):
+            """Version of the FFmpeg binary the app itself uses.
+
+            Uses find_ffmpeg()/find_ffprobe() — the same resolution order as
+            the workers (PyInstaller bundle, bin/ beside the exe, project
+            bin/, system PATH) — so the About row reports the binary the
+            app will actually run, falling back to ffprobe (same build)
+            when ffmpeg is missing.
+            """
+            for finder in (find_ffmpeg, find_ffprobe):
                 try:
-                    result = subprocess.run(
-                        [cmd, "-version"],
-                        capture_output=True, text=True, timeout=5, check=False
-                    )
-                    if result.returncode == 0:
-                        # Look for version line, e.g. "ffmpeg version 6.1.1"
-                        for line in result.stderr.splitlines():
-                            if line.startswith(("ffmpeg version", "ffprobe version")):
-                                return line.split("version")[1].strip()
-                except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+                    binary = finder()
+                except FileNotFoundError:
                     continue
+                version = probe_version(binary)
+                if version:
+                    return version
             return "n/a"
 
         pyside_ver = _ver("PySide6")

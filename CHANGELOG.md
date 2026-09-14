@@ -160,6 +160,17 @@ All notable changes to this project are documented here.
   `subprocess.run`-based unit tests were ported to the new interface, plus
   new tests for the cancel, timeout-kill, and missing-JSON paths.
 
+- **About dialog always showed FFmpeg as "n/a"** (`app/window.py`, `app/ffmpeg_utils.py`)
+  The version probe read ffmpeg's output from stderr, but `ffmpeg -version`
+  prints its banner to stdout — so the row showed "n/a" on every system
+  where FFmpeg was installed and on PATH (e.g. Linux Mint's apt build).
+  It also looked up the bare binary name instead of the app's own
+  resolution order, and would have returned the whole copyright line
+  rather than just the version number. The About row now reports the
+  version of the exact binary the app itself uses (PyInstaller bundle →
+  bin/ beside the exe → project bin/ → system PATH, via the new
+  `probe_version()` helper), e.g. `6.1.1-3ubuntu5`.
+
 - **Deprecated Qt 5 enum/attribute access in the theming module** (`app/theme.py`)
   `QPalette.Window`-style shorthand is superseded by the scoped
   `QPalette.ColorRole.*` form, and the two HiDPI application attributes
