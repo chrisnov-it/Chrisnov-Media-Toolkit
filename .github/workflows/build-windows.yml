@@ -26,10 +26,12 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
 
       - name: Set up Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
           python-version: "3.12"
 
@@ -81,7 +83,7 @@ jobs:
           "BUNDLED_ZIP=$bundledZip"   | Out-File -FilePath $env:GITHUB_ENV -Append
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: chrisnov-media-toolkit-windows-x64
           path: |
@@ -105,18 +107,20 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
 
       - name: Normalize version tag
         shell: bash
         run: |
-          RAW="${{ github.event.inputs.version || github.ref_name }}"
+          RAW="${APP_VERSION_RAW}"
           if [[ "$RAW" != v* ]]; then RAW="v$RAW"; fi
           echo "TAG_NAME=$RAW" >> "$GITHUB_ENV"
           echo "VERSION=${RAW#v}" >> "$GITHUB_ENV"
 
       - name: Download all build artifacts
-        uses: actions/download-artifact@v6
+        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6.0.0
         with:
           path: artifacts/
           pattern: chrisnov-media-toolkit-*
@@ -128,7 +132,7 @@ jobs:
           awk '/^## \['"$VERSION"'\]/{flag=1; next} /^## \[/{flag=0} flag' CHANGELOG.md > release_notes.md
 
       - name: Create GitHub Release and upload assets
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
           tag_name: ${{ env.TAG_NAME }}
           name: Chrisnov Media Toolkit v${{ env.VERSION }}
