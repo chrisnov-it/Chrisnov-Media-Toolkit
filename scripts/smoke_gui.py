@@ -158,6 +158,14 @@ def main() -> None:
     for needle in ("Downloader", "Audio Converter", "Video Converter", "History"):
         check(any(needle in t for t in labels), f"missing tab label: {needle}")
 
+    # Tab icons must render (regression net for the tofu-box glyph era —
+    # glyphs depended on the user's fonts, e.g. ▣ showed as a plain box
+    # on Linux Mint; icons are now bundled SVGs)
+    missing_icons = [
+        i for i in range(w._tabs.count()) if w._tabs.tabIcon(i).isNull()
+    ]
+    check(not missing_icons, f"tabs without a rendered icon: {missing_icons}")
+
     dl = getattr(w, "download_tab", None) or w
     conv = getattr(w, "audio_tab", None) or w
     vid = getattr(w, "video_tab", None) or w

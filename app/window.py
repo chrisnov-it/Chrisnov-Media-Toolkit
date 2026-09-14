@@ -21,7 +21,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-from PySide6.QtCore import QEvent, Qt
+from PySide6.QtCore import QEvent, QSize, Qt
 from PySide6.QtGui import QDragEnterEvent, QDropEvent
 from PySide6.QtWidgets import (
     QDialog,
@@ -42,6 +42,7 @@ from .download_tab import DownloadTab
 from .ffmpeg_utils import find_ffmpeg, find_ffprobe, probe_version
 from .history import DownloadHistory
 from .history_tab import HistoryTab
+from .icon import palette_icon_color, tab_icon
 from .settings import AppSettings
 from .theme import widget_stylesheet
 from .video_convert_tab import VideoConvertTab
@@ -95,6 +96,7 @@ class MainWindow(QWidget):
             self._theme_refreshing = True
             try:
                 self.setStyleSheet(widget_stylesheet())
+                self._refresh_tab_icons()
             finally:
                 self._theme_refreshing = False
         super().changeEvent(event)
@@ -218,14 +220,18 @@ class MainWindow(QWidget):
         root.addLayout(header)
 
         self._tabs = QTabWidget()
+        self._tabs.setIconSize(QSize(16, 16))
         self.download_tab = DownloadTab(self._settings, self.history)
         self.audio_tab = AudioConverterTab(self._settings, self.download_tab.clean_tags_text)
         self.video_tab = VideoConvertTab(self._settings, self.download_tab.clean_tags_text)
         self.history_tab = HistoryTab(self.history)
-        self._tabs.addTab(self._wrap_tab(self.download_tab), "\u2b07  Downloader")
-        self._tabs.addTab(self._wrap_tab(self.audio_tab), "\u266b  Audio Converter")
-        self._tabs.addTab(self._wrap_tab(self.video_tab), "\u25a3  Video Converter")
-        self._tabs.addTab(self._wrap_tab(self.history_tab), "\U0001f4cb  History")
+        # Icons are set separately (in palette color) — text glyphs here
+        # previously went tofu on systems missing the font's symbols.
+        self._tabs.addTab(self._wrap_tab(self.download_tab), "Downloader")
+        self._tabs.addTab(self._wrap_tab(self.audio_tab), "Audio Converter")
+        self._tabs.addTab(self._wrap_tab(self.video_tab), "Video Converter")
+        self._tabs.addTab(self._wrap_tab(self.history_tab), "History")
+        self._refresh_tab_icons()
         root.addWidget(self._tabs)
 
     def _wrap_tab(self, widget: QWidget) -> QScrollArea:
@@ -235,6 +241,20 @@ class MainWindow(QWidget):
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         scroll.setWidget(widget)
         return scroll
+
+    def _refresh_tab_icons(self) -> None:
+        """(Re)render the tab icons in the current palette's text color.
+
+        Called after the tabs are built and again on theme changes so the
+        SVG icons follow Light/Dark mode instead of shipping baked-in colors.
+        """
+        if not hasattr(self, "_tabs"):
+            return
+        color = palette_icon_color(self.palette())
+        for i, name in enumerate(("download", "audio", "video", "history")):
+            icon = tab_icon(name, color)
+            if not icon.isNull():
+                self._tabs.setTabIcon(i, icon)
 
     def _apply_style(self) -> None:
         """Apply the palette-aware stylesheet from theme.py.

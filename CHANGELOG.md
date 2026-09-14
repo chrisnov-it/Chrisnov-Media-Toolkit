@@ -160,6 +160,15 @@ All notable changes to this project are documented here.
   `subprocess.run`-based unit tests were ported to the new interface, plus
   new tests for the cancel, timeout-kill, and missing-JSON paths.
 
+- **Tab "icons" were font-dependent text glyphs** (`app/window.py`, `app/icon.py`)
+  The four tab labels carried Unicode glyphs (⬇ ♫ ▣ 📋) whose rendering
+  depends entirely on which symbol fonts the user's system ships — the
+  Video Converter's ▣ (U+25A3) showed up as a plain box on Linux Mint,
+  and the others risked tofu boxes elsewhere. Tabs now use bundled line-art
+  SVG icons (inline in `app/icon.py` — no asset files, nothing extra to
+  ship in the frozen builds), rendered in the current palette's text
+  color and re-rendered on Light/Dark mode switches.
+
 - **About dialog always showed FFmpeg as "n/a"** (`app/window.py`, `app/ffmpeg_utils.py`)
   The version probe read ffmpeg's output from stderr, but `ffmpeg -version`
   prints its banner to stdout — so the row showed "n/a" on every system
