@@ -18,8 +18,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import urlparse
 
-from PySide6.QtCore import Signal
+from PySide6.QtCore import QSize, Qt, Signal
+from PySide6.QtGui import QBrush, QColor, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
+    QApplication,
     QCheckBox,
     QComboBox,
     QFileDialog,
@@ -30,9 +32,11 @@ from PySide6.QtWidgets import (
     QListWidget,
     QListWidgetItem,
     QMessageBox,
+    QPlainTextEdit,
     QProgressBar,
     QPushButton,
     QSizePolicy,
+    QTextEdit,
     QVBoxLayout,
     QWidget,
 )
@@ -52,6 +56,7 @@ from .constants import (
     VIDEO_CONTAINERS,
 )
 from .history import DownloadHistory
+from .icon import STATUS_COLORS, queue_status_icon
 from .settings import AppSettings
 from .theme import _base_font_size as _font_size
 from .utils import open_in_explorer
@@ -61,6 +66,7 @@ from .worker import (
     PlaylistInspectWorker,
     audio_extensions,
     video_extensions,
+    ytdlp_update_hint,
 )
 from .worker_tracking import WorkerTracker
 from .yt_dlp_opts import is_playlist_url
@@ -180,6 +186,7 @@ class DownloadTab(QWidget):
         root.addWidget(QLabel("Queue:"))
         self.queue_list = QListWidget()
         self.queue_list.setMinimumHeight(90)
+        self.queue_list.setIconSize(QSize(14, 14))
         self.queue_list.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         root.addWidget(self.queue_list, 1)
 
@@ -334,6 +341,14 @@ class DownloadTab(QWidget):
         self.status_label = QLabel("Ready.")
         root.addWidget(self.status_label)
 
+        # Ctrl+V/Cmd+V anywhere on this tab queues every URL in the
+        # clipboard. A focused text field keeps its normal paste — the
+        # line edit wins the key via ShortcutOverride, and _paste_clipboard
+        # replays the default paste if the shortcut still fires.
+        paste_sc = QShortcut(QKeySequence(QKeySequence.StandardKey.Paste), self)
+        paste_sc.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
+        paste_sc.activated.connect(self._paste_clipboard)
+
     # ------------------------------------------------------------------ #
     #  URL helpers                                                         #
     # ------------------------------------------------------------------ #
@@ -352,6 +367,14 @@ class DownloadTab(QWidget):
             self._add_url(text.strip())
             n_added = 1
         self.status_label.setText(f"Added {n_added} URL(s) to queue.")
+
+    def _paste_clipboard(self) -> None:
+        """Ctrl+V/Cmd+V outside text fields: queue every URL in the clipboard."""
+        focus = QApplication.focusWidget()
+        if isinstance(focus, (QLineEdit, QTextEdit, QPlainTextEdit)):
+            focus.paste()  # replay the native paste this shortcut intercepted
+            return
+        self.add_urls_from_text(QApplication.clipboard().text())
 
     def _add_url(self, url: str) -> bool:
         """Add a URL to the queue. Returns False when a batch is active and
@@ -712,6 +735,23 @@ class DownloadTab(QWidget):
         self.status_label.setText("Download cancelled.")
         self._reset_after_batch()
 
+    def _mark_queue_item(self, row: int, status: str,
+                         tooltip: str = "") -> None:
+        """Give a queue row its batch status: amber arrow = running, green
+        check = done, red cross = failed (+ optional tooltip). Rows stay
+        aligned with batch.urls because queue edits are blocked mid-batch."""
+        item = self.queue_list.item(row)
+        if item is None:
+            return
+        icon = queue_status_icon(status)
+        if not icon.isNull():
+            item.setIcon(icon)
+        color = STATUS_COLORS.get(status)
+        if color:
+            item.setForeground(QBrush(QColor(color)))
+        if tooltip:
+            item.setToolTip(tooltip)
+
     def _kick_next(self) -> None:
         batch = self._batch
         if batch is None:
@@ -727,6 +767,7 @@ class DownloadTab(QWidget):
         idx_label = f"[{batch.idx + 1}/{batch.total}]"
         self.status_label.setText(f"{idx_label} Starting: {url}")
         self.dl_progress.setValue(0)
+        self._mark_queue_item(batch.idx, "running")
 
         self.worker = DownloadWorker(
             url=url,
@@ -786,6 +827,7 @@ class DownloadTab(QWidget):
             self.status_label.setText(
                 f"Cleaned {len(renamed)} file(s), e.g. {renamed[0]!r}"
             )
+        self._mark_queue_item(batch.idx, "done")
 
         batch.idx += 1
         batch.done += 1
@@ -851,9 +893,14 @@ class DownloadTab(QWidget):
             container=batch.container, audio_only=batch.audio_only,
             status="failed", error=msg,
         )
-        self.status_label.setText(
-            f"[{batch.idx + 1}/{batch.total}] Error: {msg}"
+        hint = ytdlp_update_hint(msg)
+        status = f"[{batch.idx + 1}/{batch.total}] Error: {msg}"
+        if hint:
+            status += f" — {hint}"
+        self._mark_queue_item(
+            batch.idx, "failed", tooltip=msg + (f"\n\n{hint}" if hint else "")
         )
+        self.status_label.setText(status)
         batch.idx += 1
         self.history_changed.emit()
         self._kick_next()

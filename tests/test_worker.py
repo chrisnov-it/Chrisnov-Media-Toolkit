@@ -1,4 +1,4 @@
-"""Tests for app.worker — FileSizeWorker cancellation.
+"""Tests for app.worker — FileSizeWorker cancellation + yt-dlp update hint.
 
 Regression: MainWindow._start_download() calls FileSizeWorker.cancel() when
 the user presses Start while an Info fetch is still in flight. Before the fix,
@@ -6,7 +6,9 @@ FileSizeWorker had no cancel() and the call raised AttributeError, aborting
 the download start.
 """
 
-from app.worker import FileSizeWorker
+import sys
+
+from app.worker import FileSizeWorker, ytdlp_update_hint
 
 
 class _FakeYoutubeDL:
@@ -103,3 +105,37 @@ class TestFileSizeWorkerCancel:
 
         assert results == []
         assert errors == ["network down"]
+
+
+class TestYtdlpUpdateHint:
+    """The hint must fire only for extractor-type errors and adapt the
+    advice to how the app runs (frozen exe vs source checkout)."""
+
+    def test_hits_extractor_errors(self):
+        for err in (
+            "ERROR: [youtube] dQw4: Sign in to confirm you're not a bot",
+            "ERROR: unable to extract initial data",
+            "nsig extraction failed: could not decipher",
+            "Signature extraction failed: player JS changed",
+        ):
+            assert ytdlp_update_hint(err) is not None, err
+
+    def test_ignores_non_extractor_errors(self):
+        for err in ("connection timeout", "File not found: /tmp/x.mp3", ""):
+            assert ytdlp_update_hint(err) is None
+
+    def test_match_is_case_insensitive(self):
+        assert ytdlp_update_hint("UNABLE TO EXTRACT IX02") is not None
+
+    def test_source_mode_hints_pip(self, monkeypatch):
+        monkeypatch.delattr(sys, "frozen", raising=False)
+        hint = ytdlp_update_hint("Unable to extract video info")
+        assert hint is not None
+        assert "pip install -U yt-dlp" in hint
+
+    def test_frozen_mode_hints_app_release(self, monkeypatch):
+        monkeypatch.setattr(sys, "frozen", True, raising=False)
+        hint = ytdlp_update_hint("Unable to extract video info")
+        assert hint is not None
+        assert "latest" in hint
+        assert "pip" not in hint

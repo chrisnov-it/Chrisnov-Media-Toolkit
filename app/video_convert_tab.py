@@ -10,6 +10,8 @@ from __future__ import annotations
 from collections.abc import Callable
 from pathlib import Path
 
+from PySide6.QtCore import QSize, Qt
+from PySide6.QtGui import QBrush, QColor
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
@@ -36,6 +38,7 @@ from .converter_worker import (
     VIDEO_QUALITY_PRESETS,
     VideoConvertWorker,
 )
+from .icon import STATUS_COLORS, queue_status_icon
 from .settings import AppSettings
 from .utils import open_in_explorer
 from .worker_tracking import WorkerTracker
@@ -91,6 +94,7 @@ class VideoConvertTab(QWidget):
         root.addWidget(QLabel("Videos:"))
         self.video_conv_file_list = QListWidget()
         self.video_conv_file_list.setMinimumHeight(90)
+        self.video_conv_file_list.setIconSize(QSize(14, 14))
         self.video_conv_file_list.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
         )
@@ -98,6 +102,16 @@ class VideoConvertTab(QWidget):
             QAbstractItemView.SelectionMode.ExtendedSelection
         )
         root.addWidget(self.video_conv_file_list, 1)
+
+        # Empty-state placeholder (mirrors the History tab)
+        self._video_conv_empty = QLabel(
+            "No videos yet.\nAdd videos or a folder to get started."
+        )
+        self._video_conv_empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._video_conv_empty.setStyleSheet(
+            "color: palette(text); font-size: 9pt; padding: 40px;"
+        )
+        root.addWidget(self._video_conv_empty)
 
         fbtn_row = QHBoxLayout()
         self.video_conv_add_files_btn = QPushButton("Files")
@@ -187,6 +201,26 @@ class VideoConvertTab(QWidget):
     #  File list helpers                                                   #
     # ------------------------------------------------------------------ #
 
+    def _refresh_video_conv_empty(self) -> None:
+        """Show the empty-state placeholder iff the video list has no rows."""
+        self._video_conv_empty.setVisible(self.video_conv_file_list.count() == 0)
+
+    def _mark_video_conv_item(self, row: int, status: str,
+                              tooltip: str = "") -> None:
+        """Give a video row its batch status: amber arrow = running, green
+        check = done, red cross = failed (+ optional tooltip)."""
+        item = self.video_conv_file_list.item(row)
+        if item is None:
+            return
+        icon = queue_status_icon(status)
+        if not icon.isNull():
+            item.setIcon(icon)
+        color = STATUS_COLORS.get(status)
+        if color:
+            item.setForeground(QBrush(QColor(color)))
+        if tooltip:
+            item.setToolTip(tooltip)
+
     def _video_conv_add_file(self, path: Path) -> None:
         if path in self._video_conv_files:
             return
@@ -198,6 +232,7 @@ class VideoConvertTab(QWidget):
             return
         self._video_conv_files.append(path)
         self.video_conv_file_list.addItem(QListWidgetItem(path.name))
+        self._refresh_video_conv_empty()
 
     def _video_conv_add_folder(self, folder: Path) -> int:
         added = 0
@@ -235,10 +270,12 @@ class VideoConvertTab(QWidget):
             if 0 <= row < len(self._video_conv_files):
                 self._video_conv_files.pop(row)
             self.video_conv_file_list.takeItem(row)
+        self._refresh_video_conv_empty()
 
     def _video_conv_clear_files(self) -> None:
         self._video_conv_files.clear()
         self.video_conv_file_list.clear()
+        self._refresh_video_conv_empty()
         self.video_conv_status_label.setText("File list cleared.")
 
     def _video_conv_browse_dir(self) -> None:
@@ -293,6 +330,7 @@ class VideoConvertTab(QWidget):
 
         self.video_conv_status_label.setText(f"{idx_label} Preparing {src.name}...")
         self.video_conv_progress.setValue(0)
+        self._mark_video_conv_item(self._video_conv_idx, "running")
 
         self._video_conv_worker = VideoConvertWorker(
             src=src,
@@ -315,6 +353,7 @@ class VideoConvertTab(QWidget):
         self.video_conv_status_label.setText(
             f"[{self._video_conv_idx + 1}/{self._video_conv_total}] Done -> {name}"
         )
+        self._mark_video_conv_item(self._video_conv_idx, "done")
         self._video_conv_idx += 1
         self._video_conv_done += 1
         self._video_conv_kick_next()
@@ -323,6 +362,7 @@ class VideoConvertTab(QWidget):
         self.video_conv_status_label.setText(
             f"[{self._video_conv_idx + 1}/{self._video_conv_total}] Error: {msg}"
         )
+        self._mark_video_conv_item(self._video_conv_idx, "failed", tooltip=msg)
         self._video_conv_idx += 1
         self._video_conv_kick_next()
 
@@ -348,6 +388,7 @@ class VideoConvertTab(QWidget):
     def _video_conv_reset(self) -> None:
         self._video_conv_files.clear()
         self.video_conv_file_list.clear()
+        self._refresh_video_conv_empty()
         self.video_conv_start_btn.setEnabled(True)
         self.video_conv_cancel_btn.setEnabled(False)
         for btn in (self.video_conv_add_files_btn, self.video_conv_add_folder_btn,

@@ -11,6 +11,8 @@ from __future__ import annotations
 from collections.abc import Callable
 from pathlib import Path
 
+from PySide6.QtCore import QSize, Qt
+from PySide6.QtGui import QBrush, QColor
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QButtonGroup,
@@ -45,6 +47,7 @@ from .converter_worker import (
     SUPPORTED_INPUT_EXTENSIONS,
     ConvertWorker,
 )
+from .icon import STATUS_COLORS, queue_status_icon
 from .settings import AppSettings
 from .utils import open_in_explorer
 from .worker_tracking import WorkerTracker
@@ -101,11 +104,22 @@ class AudioConverterTab(QWidget):
         root.addWidget(QLabel("Files:"))
         self.conv_file_list = QListWidget()
         self.conv_file_list.setMinimumHeight(90)
+        self.conv_file_list.setIconSize(QSize(14, 14))
         self.conv_file_list.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.conv_file_list.setSelectionMode(
             QAbstractItemView.SelectionMode.ExtendedSelection
         )
         root.addWidget(self.conv_file_list, 1)
+
+        # Empty-state placeholder (mirrors the History tab)
+        self._conv_empty = QLabel(
+            "No files yet.\nAdd files or a folder to get started."
+        )
+        self._conv_empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._conv_empty.setStyleSheet(
+            "color: palette(text); font-size: 9pt; padding: 40px;"
+        )
+        root.addWidget(self._conv_empty)
 
         fbtn_row = QHBoxLayout()
         self.conv_add_files_btn = QPushButton("Files")
@@ -267,6 +281,26 @@ class AudioConverterTab(QWidget):
     #  File list helpers                                                   #
     # ------------------------------------------------------------------ #
 
+    def _refresh_conv_empty(self) -> None:
+        """Show the empty-state placeholder iff the file list has no rows."""
+        self._conv_empty.setVisible(self.conv_file_list.count() == 0)
+
+    def _mark_conv_item(self, row: int, status: str,
+                        tooltip: str = "") -> None:
+        """Give a file row its batch status: amber arrow = running, green
+        check = done, red cross = failed (+ optional tooltip)."""
+        item = self.conv_file_list.item(row)
+        if item is None:
+            return
+        icon = queue_status_icon(status)
+        if not icon.isNull():
+            item.setIcon(icon)
+        color = STATUS_COLORS.get(status)
+        if color:
+            item.setForeground(QBrush(QColor(color)))
+        if tooltip:
+            item.setToolTip(tooltip)
+
     def _conv_add_file(self, path: Path) -> None:
         """Add a single file to the converter queue (dedup by path)."""
         if path in self._conv_files:
@@ -279,6 +313,7 @@ class AudioConverterTab(QWidget):
             return
         self._conv_files.append(path)
         self.conv_file_list.addItem(QListWidgetItem(path.name))
+        self._refresh_conv_empty()
 
     def _conv_add_folder(self, folder: Path) -> int:
         """Add supported audio/video files from a folder tree."""
@@ -316,10 +351,12 @@ class AudioConverterTab(QWidget):
             if 0 <= row < len(self._conv_files):
                 self._conv_files.pop(row)
             self.conv_file_list.takeItem(row)
+        self._refresh_conv_empty()
 
     def _conv_clear_files(self) -> None:
         self._conv_files.clear()
         self.conv_file_list.clear()
+        self._refresh_conv_empty()
         self.conv_status_label.setText("File list cleared.")
 
     def _conv_browse_dir(self) -> None:
@@ -410,6 +447,7 @@ class AudioConverterTab(QWidget):
 
         self.conv_status_label.setText(f"{idx_label} Preparing {src.name}...")
         self.conv_progress.setValue(0)
+        self._mark_conv_item(self._conv_idx, "running")
 
         self._conv_worker = ConvertWorker(
             src=src,
@@ -437,6 +475,7 @@ class AudioConverterTab(QWidget):
         self.conv_status_label.setText(
             f"[{self._conv_idx + 1}/{self._conv_total}] Done → {name}"
         )
+        self._mark_conv_item(self._conv_idx, "done")
         self._conv_idx  += 1
         self._conv_done += 1
         self._conv_kick_next()
@@ -445,6 +484,7 @@ class AudioConverterTab(QWidget):
         self.conv_status_label.setText(
             f"[{self._conv_idx + 1}/{self._conv_total}] Error: {msg}"
         )
+        self._mark_conv_item(self._conv_idx, "failed", tooltip=msg)
         self._conv_idx += 1
         self._conv_kick_next()
 
@@ -470,6 +510,7 @@ class AudioConverterTab(QWidget):
     def _conv_reset(self) -> None:
         self._conv_files.clear()
         self.conv_file_list.clear()
+        self._refresh_conv_empty()
         self.conv_start_btn.setEnabled(True)
         self.conv_cancel_btn.setEnabled(False)
         for btn in (self.conv_add_files_btn, self.conv_add_folder_btn,

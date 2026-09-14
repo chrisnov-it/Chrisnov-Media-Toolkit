@@ -226,6 +226,11 @@ def main() -> None:
     check(hist._history_empty.isHidden(), "empty placeholder should hide again")
 
     # --- Converter file lists ----------------------------------------------
+    # Empty-state placeholder: visible while the list is empty, hidden
+    # once files are queued, back again after Clear.
+    check(not conv._conv_empty.isHidden(),
+          "conv empty placeholder should start visible")
+
     conv._conv_add_file(Path("/cmt-smoke/notes.txt"))
     check(conv.conv_file_list.count() == 0, "unsupported .txt must be skipped")
     check("Skipped" in conv.conv_status_label.text(),
@@ -243,16 +248,26 @@ def main() -> None:
     added = conv._conv_add_folder(folder)
     check(added == 2, f"folder add should return 2 supported files, got {added}")
     check(conv.conv_file_list.count() == 3, "folder add should leave 3 files queued")
+    check(conv._conv_empty.isHidden(),
+          "conv empty placeholder should hide while files are queued")
 
     conv._conv_clear_files()
     check(conv.conv_file_list.count() == 0, "clear should empty converter list")
+    check(not conv._conv_empty.isHidden(),
+          "conv empty placeholder should return after clear")
 
     # --- Video converter file lists -----------------------------------------
+    check(not vid._video_conv_empty.isHidden(),
+          "video empty placeholder should start visible")
     vid._video_conv_add_file(Path("/cmt-smoke/clip.mp4"))
     vid._video_conv_add_file(Path("/cmt-smoke/song.mp3"))
     check(vid.video_conv_file_list.count() == 1, "video list should keep only .mp4")
+    check(vid._video_conv_empty.isHidden(),
+          "video empty placeholder should hide while videos are queued")
     vid._video_conv_clear_files()
     check(vid.video_conv_file_list.count() == 0, "clear should empty video list")
+    check(not vid._video_conv_empty.isHidden(),
+          "video empty placeholder should return after clear")
 
     # --- Worker tracking ----------------------------------------------------
     class _Quick(QThread):

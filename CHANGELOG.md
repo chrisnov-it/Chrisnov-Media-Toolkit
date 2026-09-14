@@ -21,6 +21,32 @@ All notable changes to this project are documented here.
   sanitization, newest-first append + persistence, nested parent-dir creation,
   entry capping, and clear.
 
+- **Per-item status icons in every batch queue** (Downloader, Audio
+  Converter, Video Converter)
+  Queue rows now carry a colored status mark as the batch advances: amber
+  arrow = running, green check = completed, red cross = failed — the row
+  text takes the same color, and a failed download keeps the error (plus
+  the yt-dlp hint, see below) as a row tooltip. Mid-batch progress is
+  scannable on the list itself instead of only in the status bar.
+
+- **Mode-aware "update yt-dlp" hint on extractor-type download errors**
+  `ytdlp_update_hint()` (`app/worker.py`, unit-tested in `tests/test_worker.py`)
+  recognizes errors that mean yt-dlp is out of date (YouTube "not a bot"
+  checks, "unable to extract", signature/nsig extraction failures — the
+  A/B-cohort cases where one video fails while every other URL works) and
+  appends the right advice to the status bar: frozen builds point to the
+  latest app release, source installs to `pip install -U yt-dlp curl_cffi`
+  from the README. Display-only — the stored history error stays raw.
+
+- **Empty-state placeholders in both converter tabs**
+  "No files yet." / "No videos yet." while the list is empty, mirroring
+  the History tab's placeholder pattern.
+
+- **Keyboard shortcuts**
+  Ctrl+V/Cmd+V on the Downloader tab queues every URL in the clipboard
+  (focused text fields keep their normal paste); F1 opens the About
+  dialog from anywhere in the app.
+
 ### Changed
 
 - **`MainWindow` split into one module per tab** (`app/window.py` + new `app/download_tab.py`, `app/convert_tab.py`, `app/video_convert_tab.py`, `app/history_tab.py`)

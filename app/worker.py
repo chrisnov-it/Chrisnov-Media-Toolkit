@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 
 from PySide6.QtCore import Signal
@@ -16,6 +17,46 @@ from .yt_dlp_opts import (
     build_dry_opts,
     build_format_opts,
 )
+
+# ---------------------------------------------------------------------------
+# yt-dlp update hint
+# ---------------------------------------------------------------------------
+
+# Lowercase fragments that mark an error as a yt-dlp extractor problem
+# rather than a network/filesystem one. YouTube A/B-tests its pages and
+# players; videos in a new cohort fail with these messages until yt-dlp
+# ships a fix while every other URL keeps working — which is exactly why
+# it looks so random ("only this one video fails").
+_YTDLP_UPDATE_MARKERS = (
+    "not a bot",             # "Sign in to confirm you're not a bot"
+    "unable to extract",     # ExtractorError: unable to extract ...
+    "signature extraction",  # player signature changed
+    "nsig",                  # nsig extraction failed / could not decipher
+)
+
+
+def ytdlp_update_hint(error: str) -> str | None:
+    """Mode-aware "update yt-dlp" hint for extractor-type download errors.
+
+    Returns None when the error doesn't look like an outdated-yt-dlp
+    problem (timeout, missing file, bad URL, ...) so callers only show
+    the hint when it can actually help. Frozen builds get a "download the
+    latest app release" hint (their yt-dlp is baked into the exe); source
+    installs get the pip command from the README.
+    """
+    if not error:
+        return None
+    if not any(marker in error.lower() for marker in _YTDLP_UPDATE_MARKERS):
+        return None
+    if getattr(sys, "frozen", False):
+        return (
+            "This is usually fixed in a newer app release — "
+            "please download the latest version."
+        )
+    return (
+        "This is usually fixed by updating yt-dlp — run "
+        "pip install -U yt-dlp curl_cffi, then restart the app."
+    )
 
 
 class _CancelledError(Exception):

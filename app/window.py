@@ -22,7 +22,7 @@ import sys
 from pathlib import Path
 
 from PySide6.QtCore import QEvent, QSize, Qt
-from PySide6.QtGui import QDragEnterEvent, QDropEvent
+from PySide6.QtGui import QDragEnterEvent, QDropEvent, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QDialog,
     QFrame,
@@ -42,7 +42,7 @@ from .download_tab import DownloadTab
 from .ffmpeg_utils import find_ffmpeg, find_ffprobe, probe_version
 from .history import DownloadHistory
 from .history_tab import HistoryTab
-from .icon import palette_icon_color, tab_icon
+from .icon import bundled_icon, palette_icon_color
 from .settings import AppSettings
 from .theme import widget_stylesheet
 from .video_convert_tab import VideoConvertTab
@@ -234,6 +234,9 @@ class MainWindow(QWidget):
         self._refresh_tab_icons()
         root.addWidget(self._tabs)
 
+        # F1 opens the About dialog from anywhere in the app
+        QShortcut(QKeySequence("F1"), self).activated.connect(self._show_about)
+
     def _wrap_tab(self, widget: QWidget) -> QScrollArea:
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
@@ -252,7 +255,7 @@ class MainWindow(QWidget):
             return
         color = palette_icon_color(self.palette())
         for i, name in enumerate(("download", "audio", "video", "history")):
-            icon = tab_icon(name, color)
+            icon = bundled_icon(name, color)
             if not icon.isNull():
                 self._tabs.setTabIcon(i, icon)
 
