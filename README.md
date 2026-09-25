@@ -69,7 +69,7 @@ git clone https://github.com/chrisnov-it/Chrisnov-Media-Toolkit.git
 cd Chrisnov-Media-Toolkit
 python3 -m venv .venv
 .venv/bin/pip install -U pip
-.venv/bin/pip install PySide6 yt-dlp curl_cffi
+.venv/bin/pip install -r requirements.txt
 .venv/bin/python main.py
 ```
 
@@ -83,7 +83,7 @@ git clone https://github.com/chrisnov-it/Chrisnov-Media-Toolkit.git
 cd Chrisnov-Media-Toolkit
 py -m venv .venv
 .venv\Scripts\pip install -U pip
-.venv\Scripts\pip install PySide6 yt-dlp curl_cffi
+.venv\Scripts\pip install -r requirements.txt
 .venv\Scripts\python main.py
 ```
 
@@ -96,7 +96,7 @@ git clone https://github.com/chrisnov-it/Chrisnov-Media-Toolkit.git
 cd Chrisnov-Media-Toolkit
 python3 -m venv .venv
 .venv/bin/pip install -U pip
-.venv/bin/pip install PySide6 yt-dlp curl_cffi
+.venv/bin/pip install -r requirements.txt
 .venv/bin/python main.py
 ```
 
@@ -126,10 +126,10 @@ python3 -m venv .venv
 - **History**: search/filter past downloads by name or URL, and by type. Double-click a ✅ to open the folder, or a ❌ to re-download.
 
 ### Audio Converter tab
-Convert local audio files, or pull the audio out of local videos, to **mp3, m4a, opus, flac, or wav**. Options: bitrate, sample rate, loudness normalization (EBU R128), trim silence, and **Add folder…** to batch a whole album.
+Convert local audio files, or pull the audio out of local videos, to **mp3, m4a, opus, flac, or wav**. Options: bitrate, sample rate, loudness normalization (EBU R128), trim silence, and **Folder** to batch a whole album. The progress bar shows a live ETA while converting.
 
 ### Video Converter tab
-Convert local videos to **mp4, mkv, or webm**. Quality presets: **Keep quality / Balanced / Smaller file**. “Keep original audio when possible” keeps your existing audio track when the container supports it.
+Convert local videos to **mp4, mkv, or webm**. Quality presets: **Keep quality / Balanced / Smaller file**. “Keep original audio when possible” keeps your existing audio track when the container supports it. The progress bar shows a live ETA while converting.
 
 ### Drag & drop
 Drop a URL, some text, or a `.txt` file of URLs (one per line) onto the window to add them to the queue. Lines starting with `#` are ignored.
@@ -166,7 +166,7 @@ The app remembers the last output folder you chose for each mode. The defaults a
 **Q: Dailymotion / Vimeo / Instagram fail to download.**
 - These sites block default requests; the app handles them via browser impersonation (enabled automatically when cookies are used).
 - For private/authenticated content: check **Use browser cookies**, or click **Cookie file…** and pick a `cookies.txt` exported from your browser.
-- Running from source? Ensure `curl_cffi` is installed: `pip install curl_cffi`.
+- Running from source? Ensure the pinned dependencies are installed: `pip install -r requirements.txt` (this includes `curl_cffi`).
 
 **Q: How do I get a cookies.txt file from my browser?**
 - **Chrome/Edge:** install the *“Get cookies.txt”* extension, open the page you want, click the extension and save.
@@ -177,7 +177,8 @@ The app remembers the last output folder you chose for each mode. The defaults a
 - Check the full list: `yt-dlp --list-extractors`. If it’s supported by yt-dlp, this app supports it. Some sites need impersonation (already built‑in) and/or cookies.
 
 **Q: Does the app send my data anywhere?**
-- No. Everything runs locally on your computer. yt-dlp only talks to YouTube/CDN like a browser does when playing a video.
+- Almost everything runs locally on your computer. yt-dlp only talks to YouTube/CDN like a browser does when playing a video.
+- One exception: opening the **About** dialog checks PyPI once in the background to see if a newer yt-dlp exists (shows an update notice only when one is actually newer). No personal data is sent.
 
 **Q: Unsigned/“recognized developer” warnings on macOS?**
 - Expected for beta builds without a paid code‑signing certificate. Right‑click → **Open** to run; the app is safe.
@@ -217,4 +218,4 @@ Panduan lengkap dalam Bahasa Indonesia tersedia di [blog kami](https://chrisnov.
 | Buka folder file yang pernah diunduh | Tab **History**, double-click item yang statusnya ✅ |
 | Download ulang file yang gagal | Tab **History**, double-click item yang statusnya ❌ |
 | Ubah folder tujuan | Klik **Browse...** di samping kolom Output folder |
-| Convert satu folder album | Buka **Audio Converter**, klik **Add folder...**, pilih output, klik Convert |
+| Convert satu folder album | Buka **Audio Converter**, klik **Folder**, pilih output, klik Convert |

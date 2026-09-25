@@ -74,7 +74,8 @@ cd Chrisnov-Media-Toolkit
 
 python3.12 -m venv .venv
 source .venv/bin/activate
-pip install -U pip PySide6 yt-dlp
+pip install -U pip
+pip install -r requirements.txt
 
 python main.py
 ```
@@ -110,7 +111,8 @@ cd Chrisnov-Media-Toolkit
 
 python3.12 -m venv .venv
 source .venv/bin/activate
-pip install -U pip PySide6 yt-dlp pyinstaller
+pip install -U pip
+pip install -r requirements-dev.txt
 
 pyinstaller chrisnov-media-toolkit.spec
 open "dist/Chrisnov Media Toolkit.app"
