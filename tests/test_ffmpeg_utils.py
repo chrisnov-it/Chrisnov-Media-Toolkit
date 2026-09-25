@@ -5,6 +5,7 @@ These cover the logic extracted out of converter_worker.py during the
 workers refactor.
 """
 
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 from typing import ClassVar
@@ -29,7 +30,10 @@ class TestFindBinary:
     def test_uses_pyinstaller_bundled_binary(self, tmp_path, monkeypatch):
         bundled_dir = tmp_path / "bundle"
         (bundled_dir / "bin").mkdir(parents=True)
-        bundled = bundled_dir / "bin" / "ffmpeg"
+        # find_binary() appends ".exe" on win32, so the fixture must use the
+        # platform's extension or the lookup falls through to PATH on Windows.
+        ext = ".exe" if sys.platform == "win32" else ""
+        bundled = bundled_dir / "bin" / f"ffmpeg{ext}"
         bundled.write_text("binary")
         monkeypatch.setattr("sys._MEIPASS", str(bundled_dir), raising=False)
 
@@ -45,9 +49,12 @@ class TestFindBinary:
 
         assert find_binary("ffprobe") == str(bundled)
 
-    def test_falls_back_to_system_path(self, monkeypatch):
+    def test_falls_back_to_system_path(self, monkeypatch, tmp_path):
         monkeypatch.delattr("sys._MEIPASS", raising=False)
         monkeypatch.delattr("sys.frozen", raising=False)
+        # A bundled build leaves a real bin/ in the checkout, so the
+        # project-local lookup is redirected to a directory that does not exist.
+        monkeypatch.setattr(ffmpeg_utils, "_local_bin_dir", lambda: tmp_path / "no-bin")
         monkeypatch.setattr("shutil.which", lambda name: f"/usr/bin/{name}")
         assert find_binary("ffmpeg") == "/usr/bin/ffmpeg"
 
@@ -80,9 +87,10 @@ class TestFindBinary:
 
         assert find_binary("ffmpeg") == str(bundled)
 
-    def test_raises_when_nowhere_to_be_found(self, monkeypatch):
+    def test_raises_when_nowhere_to_be_found(self, monkeypatch, tmp_path):
         monkeypatch.delattr("sys._MEIPASS", raising=False)
         monkeypatch.delattr("sys.frozen", raising=False)
+        monkeypatch.setattr(ffmpeg_utils, "_local_bin_dir", lambda: tmp_path / "no-bin")
         monkeypatch.setattr("shutil.which", lambda name: None)
         with pytest.raises(FileNotFoundError):
             find_binary("ffmpeg")
@@ -366,7 +374,6 @@ class TestRunFfmpegWithProgress:
         _FakePopen.records.clear()
         monkeypatch.setattr("subprocess.Popen", _FakePopen, raising=False)
         return _FakePopen
-
     @staticmethod
     def _cmd():
         return ["/bin/ffmpeg", "-i", "in.mp3", "out.mp3"]
@@ -465,3 +472,98 @@ class TestRunFfmpegWithProgress:
                 on_progress=progress.append,
             )
 
+
+class TestNoWindowKwargs:
+    """Child ffmpeg/ffprobe processes must never open a console window.
+
+    The released app is built with ``console=False``, so on Windows every
+    console-subsystem child gets a brand-new console window unless
+    CREATE_NO_WINDOW is passed: ffprobe flashed one whenever the About dialog
+    read the FFmpeg version / a conversion was prepared, and ffmpeg kept one
+    open for the whole encode or loudness scan.
+    """
+
+    def test_windows_requests_no_window(self, monkeypatch):
+        monkeypatch.setattr("sys.platform", "win32")
+        assert ffmpeg_utils._no_window_kwargs() == {
+            "creationflags": ffmpeg_utils._CREATE_NO_WINDOW
+        }
+        # Documented Windows value, even where subprocess lacks the constant
+        assert ffmpeg_utils._CREATE_NO_WINDOW == 0x08000000
+
+    def test_other_platforms_add_nothing(self, monkeypatch):
+        for platform in ("linux", "darwin"):
+            monkeypatch.setattr("sys.platform", platform)
+            assert ffmpeg_utils._no_window_kwargs() == {}
+
+    def test_probe_version_passes_the_flag(self, monkeypatch):
+        monkeypatch.setattr("sys.platform", "win32")
+        calls = {}
+
+        def fake_run(cmd, **kw):
+            calls["kw"] = kw
+            return SimpleNamespace(returncode=0, stdout="ffmpeg version 6.1.1\n")
+
+        monkeypatch.setattr("subprocess.run", fake_run)
+        assert probe_version("/usr/bin/ffmpeg") == "6.1.1"
+        assert calls["kw"]["creationflags"] == ffmpeg_utils._CREATE_NO_WINDOW
+
+    def test_probe_duration_passes_the_flag(self, monkeypatch):
+        monkeypatch.setattr("sys.platform", "win32")
+        calls = {}
+
+        def fake_run(cmd, **kw):
+            calls["kw"] = kw
+            return SimpleNamespace(returncode=0, stdout="12.5\n")
+
+        monkeypatch.setattr("subprocess.run", fake_run)
+        assert probe_duration("/usr/bin/ffprobe", Path("/tmp/x.mp3")) == 12.5
+        assert calls["kw"]["creationflags"] == ffmpeg_utils._CREATE_NO_WINDOW
+
+    def test_loudness_scan_passes_the_flag(self, monkeypatch):
+        monkeypatch.setattr("sys.platform", "win32")
+        records: list = []
+
+        class _ScanPopen:
+            def __init__(self, cmd, **kwargs):
+                records.append((cmd, kwargs))
+                kwargs["stderr"].write(TestProbeLoudness._JSON)
+                kwargs["stderr"].flush()
+                self.returncode = 0
+
+            def poll(self):
+                return self.returncode
+
+            def wait(self, timeout=None):
+                return self.returncode
+
+        monkeypatch.setattr("subprocess.Popen", _ScanPopen, raising=False)
+
+        result = probe_loudness("/usr/bin/ffmpeg", Path("song.mp3"), -14.0, -1.0, 11.0)
+
+        assert result["input_i"] == "-13.4"
+        assert records[0][1]["creationflags"] == ffmpeg_utils._CREATE_NO_WINDOW
+
+    def test_conversion_passes_the_flag(self, monkeypatch):
+        monkeypatch.setattr("sys.platform", "win32")
+        records: list = []
+
+        class _ConvPopen:
+            def __init__(self, cmd, **kwargs):
+                records.append((cmd, kwargs))
+                self.stdout = iter([])
+                self.returncode = 0
+
+            def wait(self, timeout=None):
+                return self.returncode
+
+        monkeypatch.setattr("subprocess.Popen", _ConvPopen, raising=False)
+
+        run_ffmpeg_with_progress(
+            ["/usr/bin/ffmpeg", "-i", "in.mp3", "out.mp3"],
+            duration=10.0,
+            cancelled=lambda: False,
+            on_progress=lambda _pct: None,
+        )
+
+        assert records[0][1]["creationflags"] == ffmpeg_utils._CREATE_NO_WINDOW

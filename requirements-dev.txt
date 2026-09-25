@@ -1,0 +1,8 @@
+# Development/test dependencies: pip install -r requirements-dev.txt
+# Kept in sync with the versions used by .github/workflows/tests.yml and the
+# build scripts (PyInstaller is pinned there too, deliberately).
+-r requirements.txt
+
+pytest==9.1.1
+ruff==0.16.9
+pyinstaller==6.17.0

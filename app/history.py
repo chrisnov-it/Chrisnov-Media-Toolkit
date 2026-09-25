@@ -32,16 +32,26 @@ class DownloadHistory:
             and data.get("version") == VERSION
             and isinstance(data.get("items"), list)
         ):
-            self.entries = data["items"]
+            raw_items = data["items"]
         else:
-            self.entries = []
+            raw_items = []
+        # Only dicts are entries: a truncated write, a cloud-sync conflict or a
+        # hand-edited file can leave scalars in the list, and the History tab
+        # calls .get() on every entry (rendering must never crash the app).
+        self.entries = [e for e in raw_items if isinstance(e, dict)]
         # Legacy entries stored the raw worker payload (e.g.
         # "playlist_files:[...]") as the filename — replace it with a
-        # readable label.
+        # readable label. Numeric fields are coerced too: the History tab
+        # sums filesize_bytes and int()-casts timestamp, so a string there
+        # would raise TypeError mid-render.
         for entry in self.entries:
             fn = entry.get("filename")
             if isinstance(fn, str) and fn.startswith(("playlist_files:", "playlist:")):
                 entry["filename"] = "Playlist"
+            if "filesize_bytes" in entry and not isinstance(entry["filesize_bytes"], int):
+                entry["filesize_bytes"] = 0
+            if "timestamp" in entry and not isinstance(entry["timestamp"], int):
+                entry["timestamp"] = 0
 
     def save(self) -> None:
         """Write entries to JSON, creating the parent dir. Best-effort."""

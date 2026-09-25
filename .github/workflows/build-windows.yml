@@ -5,9 +5,9 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Release version, for example 0.2.0-beta.3"
+        description: "Release version, for example 0.2.0-beta.4"
         required: true
-        default: "0.2.0-beta.3"
+        default: "0.2.0-beta.4"
   push:
     tags:
       - "v*"
@@ -69,9 +69,13 @@ jobs:
           Copy-Item -LiteralPath "dist\chrisnov-media-toolkit-lite.exe"    -Destination "dist\$liteName"    -Force
           Copy-Item -LiteralPath "dist\chrisnov-media-toolkit-bundled.exe" -Destination "dist\$bundledName" -Force
 
-          # Wrap each exe in a zip (Chrome won't block a zip download)
+          # Wrap each exe in a zip (Chrome won't block a zip download). The
+          # bundled zip also carries FFmpeg's licence text when the build
+          # produced one - GPL redistribution requirement, see docs/THIRD-PARTY.md
           Compress-Archive -Path "dist\$liteName"    -DestinationPath "dist\$liteZip"    -Force
-          Compress-Archive -Path "dist\$bundledName" -DestinationPath "dist\$bundledZip" -Force
+          $bundledPayload = @("dist\$bundledName")
+          if (Test-Path "bin\FFMPEG-LICENSE.txt") { $bundledPayload += "bin\FFMPEG-LICENSE.txt" }
+          Compress-Archive -Path $bundledPayload -DestinationPath "dist\$bundledZip" -Force
 
           # SHA256 for zips (primary download files)
           (Get-FileHash -Algorithm SHA256 "dist\$liteZip").Hash    | Set-Content -Path "dist\$liteZip.sha256"

@@ -3,9 +3,10 @@
 A minimal PySide6 GUI wrapper around yt-dlp. See the README for features and setup.
 """
 
-import sys
+import contextlib
 import ctypes
 import os
+import sys
 from pathlib import Path
 
 # Put bundled/local bin directories in PATH so that both shutil.which and
@@ -26,19 +27,19 @@ for _bin_dir in _bin_dirs:
 
 from PySide6.QtWidgets import QApplication
 
-from app.theme import global_stylesheet, enable_high_dpi
-from app.window import MainWindow
 from app.icon import load_svg_icon
+from app.theme import enable_high_dpi, global_stylesheet
+from app.window import MainWindow
 
 
 def main() -> None:
     if sys.platform == "win32":
-        try:
+        # Best-effort: an invalid AppUserModelID only costs taskbar grouping,
+        # so a failure here must never stop the app from starting.
+        with contextlib.suppress(Exception):
             ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
                 "chrisnov.media-toolkit.1"
             )
-        except Exception:
-            pass
 
     # Enable HiDPI scaling BEFORE QApplication is created — critical for
     # readable fonts on macOS (especially MacBook Air 2015 where 9pt is

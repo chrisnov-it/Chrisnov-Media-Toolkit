@@ -18,6 +18,7 @@ Cross-tab wiring:
 
 from __future__ import annotations
 
+import contextlib
 import sys
 from pathlib import Path
 
@@ -45,7 +46,9 @@ from .history_tab import HistoryTab
 from .icon import bundled_icon, palette_icon_color
 from .settings import AppSettings
 from .theme import widget_stylesheet
+from .update_check import UpdateCheckWorker
 from .video_convert_tab import VideoConvertTab
+from .worker_tracking import WorkerTracker
 
 
 class MainWindow(QWidget):
@@ -57,6 +60,10 @@ class MainWindow(QWidget):
         self.setAcceptDrops(True)
 
         self._settings = AppSettings()
+        self._tracker = WorkerTracker()
+        # (label, installed version) of the About dialog's update notice, set
+        # while the dialog is open so a late worker answer can be dropped.
+        self._about_update_target: tuple[QLabel, str] | None = None
         CONFIG_DIR.mkdir(parents=True, exist_ok=True)
         self.history = DownloadHistory(CONFIG_DIR / "download-history.json")
         self.history.load()
@@ -356,27 +363,15 @@ class MainWindow(QWidget):
         _row("yt-dlp",    ytdlp_ver)
         _row("FFmpeg",    ffmpeg_ver)
 
-        # Check for newer versions and show update notice
-        newer_versions = []
-        try:
-            import json
-            import urllib.request
-
-            # Check yt-dlp latest version from PyPI
-            with urllib.request.urlopen("https://pypi.org/pypi/yt-dlp/json", timeout=3) as resp:
-                ytdlp_latest = json.loads(resp.read())["info"]["version"]
-                if ytdlp_ver != "n/a" and ytdlp_ver != ytdlp_latest:
-                    newer_versions.append(f"yt-dlp: {ytdlp_ver} → {ytdlp_latest}")
-        except (OSError, ValueError, KeyError):
-            # Best-effort network check — never block the About dialog.
-            pass
-
-        if newer_versions:
-            notice = QLabel(f"Update available: {', '.join(newer_versions)}")
-            notice.setStyleSheet("color: #e53e3e; font-size: 9pt; margin-top: 8px;")
-            # Note: red error color is intentional — should remain red in both modes
-            notice.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            layout.addWidget(notice)
+        # Update notice — filled in asynchronously by UpdateCheckWorker so the
+        # dialog never blocks on the network (see app/update_check.py) and only
+        # a genuinely newer version is advertised.
+        notice = QLabel("")
+        notice.setStyleSheet("color: #e53e3e; font-size: 9pt; margin-top: 8px;")
+        # Note: red error color is intentional — should remain red in both modes
+        notice.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        notice.hide()
+        layout.addWidget(notice)
 
         # Divider
         line2 = QLabel()
@@ -422,4 +417,41 @@ class MainWindow(QWidget):
         btn_row.addStretch()
         layout.addLayout(btn_row)
 
-        dlg.exec()
+        if ytdlp_ver != "n/a":
+            self._start_update_check(notice, ytdlp_ver)
+        try:
+            dlg.exec()
+        finally:
+            # The dialog and its labels are destroyed when exec() returns; drop
+            # the reference so a late worker answer is ignored instead of
+            # touching a deleted C++ object.
+            self._about_update_target = None
+
+    # ------------------------------------------------------------------ #
+    #  About dialog — yt-dlp update notice                                 #
+    # ------------------------------------------------------------------ #
+
+    def _start_update_check(self, notice: QLabel, current: str) -> None:
+        """Ask PyPI for the latest yt-dlp version, in the background."""
+        self._about_update_target = (notice, current)
+        worker = UpdateCheckWorker(current)
+        self._tracker.track(worker)
+        worker.update_available.connect(self._show_update_notice)
+        worker.start()
+
+    def _show_update_notice(self, latest: str) -> None:
+        """Fill in the About dialog's update notice.
+
+        Runs on the GUI thread (MainWindow is a QObject, so the worker's
+        signal is delivered queued). The dialog may already be closed by the
+        time the check answers — then the label is gone and Qt raises
+        RuntimeError from its wrapper.
+        """
+        target = self._about_update_target
+        self._about_update_target = None
+        if target is None:
+            return
+        notice, current = target
+        with contextlib.suppress(RuntimeError):
+            notice.setText(f"Update available: yt-dlp {current} → {latest}")
+            notice.show()

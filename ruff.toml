@@ -1,0 +1,31 @@
+# Ruff configuration — the single source of truth for linting so that local
+# runs, CI, and future contributors all report the same findings.
+# Run it with:  .venv/bin/python -m ruff check .   (Windows: .venv\Scripts\python)
+
+target-version = "py312"
+line-length = 100
+
+[lint]
+select = [
+    "E4",   # import
+    "E7",   # statement
+    "E9",   # runtime
+    "F",    # pyflakes
+    "I",    # isort
+    "B",    # flake8-bugbear
+    "BLE",  # flake8-blind-except
+    "RUF",  # ruff-specific
+]
+ignore = [
+    "RUF001",  # ambiguous-unicode-character-string: typographic dashes/arrows
+               # are deliberate in UI strings ("→", "—", "•").
+    "RUF003",  # ...and in comments.
+    "RUF005",  # collection-literal-concatenation: explicit list concatenation
+               # reads better in the yt-dlp/ffmpeg option builders.
+]
+
+[lint.per-file-ignores]
+# PATH and HOME isolation must be set up before Qt is imported, so the Qt
+# imports are deliberately deferred instead of sitting at the top of the file.
+"main.py" = ["E402"]
+"scripts/smoke_gui.py" = ["E402"]

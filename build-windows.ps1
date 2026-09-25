@@ -77,6 +77,9 @@ if ($Type -eq "Bundled" -or $Type -eq "Both") {
         if ($sysFfmpeg -and $sysFfprobe) {
             Write-Host "Found system FFmpeg at '$($sysFfmpeg.Source)' and FFprobe at '$($sysFfprobe.Source)'." -ForegroundColor Green
             Write-Host "Copying system binaries to '$binDir' to bypass download..." -ForegroundColor Yellow
+            Write-Host "WARNING: you are redistributing the FFmpeg build found on this machine." -ForegroundColor Yellow
+            Write-Host "         Check its licence/source and add the licence text as bin\FFMPEG-LICENSE.txt" -ForegroundColor Yellow
+            Write-Host "         before publishing a bundled release (see docs/THIRD-PARTY.md)." -ForegroundColor Yellow
             Copy-Item -Path $sysFfmpeg.Source -Destination "$binDir\ffmpeg.exe" -Force
             Copy-Item -Path $sysFfprobe.Source -Destination "$binDir\ffprobe.exe" -Force
             Write-Host "Successfully copied FFmpeg and FFprobe to '$binDir'." -ForegroundColor Green
@@ -86,10 +89,34 @@ if ($Type -eq "Bundled" -or $Type -eq "Both") {
             $zipUrl = "https://github.com/yt-dlp/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip"
             $zipFile = "$binDir\ffmpeg.zip"
             $extractDir = "$binDir\extract"
+            # The URL is a rolling "latest" tag, so the expected hash is fetched
+            # from the same release instead of being hardcoded here.
+            $checksumUrl = "https://github.com/yt-dlp/FFmpeg-Builds/releases/download/latest/checksums.sha256"
+            $checksumFile = "$binDir\ffmpeg-checksums.sha256"
             
             try {
                 Write-Host "Downloading $zipUrl..." -ForegroundColor Yellow
                 Invoke-WebRequest -Uri $zipUrl -OutFile $zipFile
+
+                Write-Host "Verifying SHA256 checksum..." -ForegroundColor Cyan
+                $expectedHash = $null
+                try {
+                    Invoke-WebRequest -Uri $checksumUrl -OutFile $checksumFile
+                    $entry = Select-String -LiteralPath $checksumFile `
+                        -Pattern 'ffmpeg-master-latest-win64-gpl\.zip\s*$' | Select-Object -First 1
+                    if ($entry) { $expectedHash = ($entry.Line -split '\s+')[0].ToUpper() }
+                } catch {
+                    Write-Host "WARNING: could not fetch checksums.sha256 - skipping verification." -ForegroundColor Yellow
+                }
+                if ($expectedHash) {
+                    $actualHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $zipFile).Hash.ToUpper()
+                    if ($actualHash -ne $expectedHash) {
+                        throw "Checksum mismatch for the FFmpeg archive.`n  expected: $expectedHash`n  actual:   $actualHash"
+                    }
+                    Write-Host "Checksum OK ($actualHash)." -ForegroundColor Green
+                } else {
+                    Write-Host "WARNING: no checksum entry for the archive - verify it manually before releasing." -ForegroundColor Yellow
+                }
                 
                 Write-Host "Extracting archive..." -ForegroundColor Yellow
                 if (Test-Path $extractDir) { Remove-Item -Recurse -Force $extractDir }
@@ -102,6 +129,17 @@ if ($Type -eq "Bundled" -or $Type -eq "Both") {
                     Move-Item -Path $extractedFfmpeg.FullName -Destination "$binDir\ffmpeg.exe" -Force
                     Move-Item -Path $extractedFfprobe.FullName -Destination "$binDir\ffprobe.exe" -Force
                     Write-Host "FFmpeg and FFprobe successfully downloaded and placed in '$binDir'." -ForegroundColor Green
+                    # The archive is a GPL build: keep its licence text so the
+                    # packaged zip can ship the attribution FFmpeg requires
+                    # (see docs/THIRD-PARTY.md).
+                    $license = Get-ChildItem -Path $extractDir -Recurse -Include 'LICENSE.txt', 'COPYING*.txt' |
+                        Select-Object -First 1
+                    if ($license) {
+                        Copy-Item -Path $license.FullName -Destination "$binDir\FFMPEG-LICENSE.txt" -Force
+                        Write-Host "Saved FFmpeg licence text to '$binDir\FFMPEG-LICENSE.txt'." -ForegroundColor Green
+                    } else {
+                        Write-Host "WARNING: no licence file found in the FFmpeg archive." -ForegroundColor Yellow
+                    }
                 } else {
                     throw "Could not find ffmpeg.exe or ffprobe.exe in the extracted archive."
                 }
@@ -111,6 +149,7 @@ if ($Type -eq "Bundled" -or $Type -eq "Both") {
             } finally {
                 if (Test-Path $extractDir) { Remove-Item -Recurse -Force $extractDir }
                 if (Test-Path $zipFile) { Remove-Item -Force $zipFile }
+                if (Test-Path $checksumFile) { Remove-Item -Force $checksumFile }
             }
         }
     } else {
@@ -146,7 +185,7 @@ $versionArray = try {
 $company = 'Chrisnov IT Solutions'
 $desc   = 'Desktop toolkit for downloading and converting media from YouTube, Vimeo, Dailymotion, Instagram, TikTok, and 1000+ sites with yt-dlp + FFmpeg'
 
-@"
+$versionInfoText = @"
 # See https://pyinstaller.org/en/stable/usage.html#embedding-version-information
 VSVersionInfo(
   ffi=FixedFileInfo(
@@ -168,7 +207,7 @@ VSVersionInfo(
           StringStruct('FileDescription', '$desc'),
           StringStruct('FileVersion',     '$appVersion'),
           StringStruct('InternalName',    'ChrisnovMediaToolkit'),
-          StringStruct('LegalCopyright',  '© $company'),
+          StringStruct('LegalCopyright',  '\u00a9 $company'),
           StringStruct('ProductName',     'Chrisnov Media Toolkit'),
           StringStruct('ProductVersion',  '$appVersion'),
         ]
@@ -177,7 +216,15 @@ VSVersionInfo(
     VarFileInfo([VarStruct('Translation', [0x0409, 0x04b0])]),
   ],
 )
-"@ | Set-Content -LiteralPath 'version_info.txt' -Encoding UTF8
+"@
+# Write without a BOM: Set-Content -Encoding UTF8 writes one under Windows
+# PowerShell 5.1, and PyInstaller parses this file as Python source (a leading
+# U+FEFF makes that parse fail on some hosts).
+[System.IO.File]::WriteAllText(
+    (Join-Path (Get-Location).Path 'version_info.txt'),
+    $versionInfoText,
+    (New-Object System.Text.UTF8Encoding($false))
+)
 
 Write-Host "  version_info.txt written (v$appVersion)" -ForegroundColor Green
 

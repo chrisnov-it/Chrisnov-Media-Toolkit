@@ -19,7 +19,7 @@
 
 !define PRODUCT_NAME "Chrisnov Media Toolkit"
 !ifndef PRODUCT_VERSION
-  !define PRODUCT_VERSION "0.2.0-beta.3"
+  !define PRODUCT_VERSION "0.2.0-beta.4"
 endif
 !define PRODUCT_PUBLISHER "Chrisnov IT Solutions"
 !define PRODUCT_WEB_SITE "https://chrisnov.com"
@@ -91,6 +91,11 @@ Section /o "Include FFmpeg (~150 MB)" SecBundled
   SetOutPath "$INSTDIR\bin"
   File "bin\ffmpeg.exe"
   File "bin\ffprobe.exe"
+  ; GPL redistribution requirement: ship FFmpeg's licence text alongside the
+  ; binaries when build-windows.ps1 saved it (see docs/THIRD-PARTY.md).
+  !if /FileExists "bin\FFMPEG-LICENSE.txt"
+    File "bin\FFMPEG-LICENSE.txt"
+  !endif
 SectionEnd
 
 ; Section descriptions
@@ -109,6 +114,7 @@ Section Uninstall
   Delete "$INSTDIR\chrisnov-media-toolkit.exe"
   Delete "$INSTDIR\bin\ffmpeg.exe"
   Delete "$INSTDIR\bin\ffprobe.exe"
+  Delete "$INSTDIR\bin\FFMPEG-LICENSE.txt"
   Delete "$INSTDIR\uninst.exe"
   RMDir "$INSTDIR\bin"
   RMDir "$INSTDIR"

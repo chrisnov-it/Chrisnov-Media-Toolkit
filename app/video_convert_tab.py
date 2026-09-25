@@ -39,6 +39,7 @@ from .converter_worker import (
     VideoConvertWorker,
 )
 from .icon import STATUS_COLORS, queue_status_icon
+from .progress import EtaEstimator
 from .settings import AppSettings
 from .utils import open_in_explorer
 from .worker_tracking import WorkerTracker
@@ -61,6 +62,8 @@ class VideoConvertTab(QWidget):
         self._video_conv_total = 0
         self._video_conv_done = 0
         self._video_conv_active = False
+        self._eta = EtaEstimator()
+        self._eta_format = "%p%"
         self._build_ui()
 
     # ------------------------------------------------------------------ #
@@ -330,6 +333,9 @@ class VideoConvertTab(QWidget):
 
         self.video_conv_status_label.setText(f"{idx_label} Preparing {src.name}...")
         self.video_conv_progress.setValue(0)
+        self._eta_format = "%p%"
+        self.video_conv_progress.setFormat(self._eta_format)
+        self._eta.reset(10, 90)
         self._mark_video_conv_item(self._video_conv_idx, "running")
 
         self._video_conv_worker = VideoConvertWorker(
@@ -342,11 +348,24 @@ class VideoConvertTab(QWidget):
             idx_label=idx_label,
         )
         self._tracker.track(self._video_conv_worker)
-        self._video_conv_worker.progress.connect(self.video_conv_progress.setValue)
+        self._video_conv_worker.progress.connect(self._on_video_conv_progress)
         self._video_conv_worker.status.connect(self.video_conv_status_label.setText)
         self._video_conv_worker.finished_ok.connect(self._on_video_conv_ok)
         self._video_conv_worker.failed.connect(self._on_video_conv_fail)
         self._video_conv_worker.start()
+
+    def _on_video_conv_progress(self, pct: int) -> None:
+        """Update the bar value and show a live ETA once estimable.
+
+        setFormat() triggers a relayout, so it is only called when the
+        displayed string actually changes (progress itself emits ~5 Hz).
+        """
+        self.video_conv_progress.setValue(pct)
+        eta = self._eta.update(pct)
+        fmt = f"%p% • ETA {eta}" if eta is not None else "%p%"
+        if fmt != self._eta_format:
+            self._eta_format = fmt
+            self.video_conv_progress.setFormat(fmt)
 
     def _on_video_conv_ok(self, out_path: str) -> None:
         name = Path(out_path).name
@@ -389,6 +408,8 @@ class VideoConvertTab(QWidget):
         self._video_conv_files.clear()
         self.video_conv_file_list.clear()
         self._refresh_video_conv_empty()
+        self._eta_format = "%p%"
+        self.video_conv_progress.setFormat(self._eta_format)
         self.video_conv_start_btn.setEnabled(True)
         self.video_conv_cancel_btn.setEnabled(False)
         for btn in (self.video_conv_add_files_btn, self.video_conv_add_folder_btn,

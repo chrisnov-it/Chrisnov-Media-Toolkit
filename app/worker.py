@@ -188,7 +188,7 @@ class DownloadWorker(CancellableWorker):
 
         try:
             candidates.append(ydl.prepare_filename(entry))
-        except Exception:  # noqa: BLE001, S110 — best-effort extra candidate only
+        except Exception:  # noqa: BLE001 — best-effort extra candidate only
             pass
 
         for candidate in candidates:

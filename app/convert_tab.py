@@ -48,6 +48,7 @@ from .converter_worker import (
     ConvertWorker,
 )
 from .icon import STATUS_COLORS, queue_status_icon
+from .progress import EtaEstimator
 from .settings import AppSettings
 from .utils import open_in_explorer
 from .worker_tracking import WorkerTracker
@@ -70,6 +71,8 @@ class AudioConverterTab(QWidget):
         self._conv_total = 0
         self._conv_done = 0
         self._conv_active = False
+        self._eta = EtaEstimator()
+        self._eta_format = "%p%"
         self._build_ui()
 
     # ------------------------------------------------------------------ #
@@ -447,6 +450,13 @@ class AudioConverterTab(QWidget):
 
         self.conv_status_label.setText(f"{idx_label} Preparing {src.name}...")
         self.conv_progress.setValue(0)
+        self._eta_format = "%p%"
+        self.conv_progress.setFormat(self._eta_format)
+        if norm_mode == "ebu":
+            # Two-pass loudnorm spans 5-90 (scan 5-40, encode 40-90).
+            self._eta.reset(5, 90)
+        else:
+            self._eta.reset(10, 90)
         self._mark_conv_item(self._conv_idx, "running")
 
         self._conv_worker = ConvertWorker(
@@ -464,11 +474,24 @@ class AudioConverterTab(QWidget):
             idx_label=idx_label,
         )
         self._tracker.track(self._conv_worker)
-        self._conv_worker.progress.connect(self.conv_progress.setValue)
+        self._conv_worker.progress.connect(self._on_conv_progress)
         self._conv_worker.status.connect(self.conv_status_label.setText)
         self._conv_worker.finished_ok.connect(self._on_conv_ok)
         self._conv_worker.failed.connect(self._on_conv_fail)
         self._conv_worker.start()
+
+    def _on_conv_progress(self, pct: int) -> None:
+        """Update the bar value and show a live ETA once estimable.
+
+        setFormat() triggers a relayout, so it is only called when the
+        displayed string actually changes (progress itself emits ~5 Hz).
+        """
+        self.conv_progress.setValue(pct)
+        eta = self._eta.update(pct)
+        fmt = f"%p% • ETA {eta}" if eta is not None else "%p%"
+        if fmt != self._eta_format:
+            self._eta_format = fmt
+            self.conv_progress.setFormat(fmt)
 
     def _on_conv_ok(self, out_path: str) -> None:
         name = Path(out_path).name
@@ -511,6 +534,8 @@ class AudioConverterTab(QWidget):
         self._conv_files.clear()
         self.conv_file_list.clear()
         self._refresh_conv_empty()
+        self._eta_format = "%p%"
+        self.conv_progress.setFormat(self._eta_format)
         self.conv_start_btn.setEnabled(True)
         self.conv_cancel_btn.setEnabled(False)
         for btn in (self.conv_add_files_btn, self.conv_add_folder_btn,

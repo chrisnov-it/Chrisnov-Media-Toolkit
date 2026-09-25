@@ -20,6 +20,25 @@ from pathlib import Path
 # Binary discovery
 # ---------------------------------------------------------------------------
 
+def _install_hint(name: str) -> str:
+    """Platform-appropriate install command for a missing FFmpeg binary."""
+    if sys.platform == "win32":
+        return "winget install Gyan.FFmpeg"
+    if sys.platform == "darwin":
+        return "brew install ffmpeg"
+    return "sudo apt install ffmpeg"
+
+
+def _local_bin_dir() -> Path:
+    """Return the project-local bin/ folder (used by dev/source runs).
+
+    A bundled build (build-windows.ps1 -Type Bundled) leaves ffmpeg.exe and
+    ffprobe.exe here, which is why the unit tests patch this callable instead
+    of relying on the checkout being free of build artifacts.
+    """
+    return Path(__file__).resolve().parent.parent / "bin"
+
+
 def find_binary(name: str) -> str:
     """Return path to a binary, preferring PyInstaller bundled bin/, then
     a bin/ folder next to the frozen executable, then project-local bin/,
@@ -48,7 +67,7 @@ def find_binary(name: str) -> str:
             return str(beside_exe)
 
     # 3. Project-local bin/ folder
-    local = Path(__file__).resolve().parent.parent / "bin" / f"{name}{ext}"
+    local = _local_bin_dir() / f"{name}{ext}"
     if local.exists():
         return str(local)
 
@@ -58,8 +77,8 @@ def find_binary(name: str) -> str:
         return system
 
     raise FileNotFoundError(
-        f"{name} not found. Install it with: sudo apt install ffmpeg"
-        if name == "ffmpeg" else f"{name} not found."
+        f"{name} not found. FFmpeg is required for this feature — install it "
+        f"with: {_install_hint(name)}"
     )
 
 
@@ -77,6 +96,26 @@ def find_ffprobe() -> str:
 # Probing
 # ---------------------------------------------------------------------------
 
+# CREATE_NO_WINDOW is Windows-only; spell the value out locally so this module
+# stays importable (and _no_window_kwargs() testable) on every platform.
+_CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
+
+
+def _no_window_kwargs() -> dict:
+    """Return Popen/subprocess.run kwargs that suppress the child's console window.
+
+    The released app is built with ``console=False``, i.e. it has no console of
+    its own, and Windows gives every console-subsystem child a brand-new console
+    window in that case. Without this, ffprobe flashes a console when the About
+    dialog reads the FFmpeg version and when a conversion is prepared, and
+    ffmpeg keeps one open for the whole encode / loudness scan. A no-op on
+    other platforms.
+    """
+    if sys.platform == "win32":
+        return {"creationflags": _CREATE_NO_WINDOW}
+    return {}
+
+
 def probe_version(binary: str) -> str | None:
     """Return the binary's version string (e.g. "6.1.1-3ubuntu5"), or None.
 
@@ -89,6 +128,7 @@ def probe_version(binary: str) -> str | None:
         result = subprocess.run(
             [binary, "-version"],
             capture_output=True, text=True, timeout=5, check=False,
+            **_no_window_kwargs(),
         )
     except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
         return None
@@ -105,7 +145,10 @@ def probe_duration(ffprobe: str, src: Path) -> float | None:
         "-of", "default=noprint_wrappers=1:nokey=1",
         str(src),
     ]
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=30, check=False)
+    result = subprocess.run(
+        cmd, capture_output=True, text=True, timeout=30, check=False,
+        **_no_window_kwargs(),
+    )
     if result.returncode != 0:
         return None
     try:
@@ -160,6 +203,7 @@ def probe_loudness(
             text=True,
             encoding="utf-8",
             errors="replace",
+            **_no_window_kwargs(),
         )
         if set_process is not None:
             set_process(process)
@@ -268,6 +312,7 @@ def run_ffmpeg_with_progress(
             text=True,
             encoding="utf-8",
             errors="replace",
+            **_no_window_kwargs(),
         )
         if set_process is not None:
             set_process(process)

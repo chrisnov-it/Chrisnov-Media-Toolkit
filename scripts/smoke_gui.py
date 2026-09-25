@@ -21,17 +21,24 @@ on the first failed check.
 """
 
 import os
+import shutil
 import sys
 import tempfile
+import time
 from pathlib import Path
 from typing import ClassVar
 
 # --- Environment isolation - MUST happen before any Qt import ----------
-# Redirect HOME/XDG_CONFIG_HOME so QSettings, download history, and the
-# skip-duplicates archive never touch the developer's real ~/.config.
+# Redirect the home directory so the download history (and the
+# skip-duplicates archive) never touch the developer's real ~/.config.
 _TMP_HOME = tempfile.mkdtemp(prefix="cmt-smoke-")
 os.environ["HOME"] = _TMP_HOME
 os.environ["XDG_CONFIG_HOME"] = os.path.join(_TMP_HOME, ".config")
+# Windows: ntpath.expanduser() reads USERPROFILE first and ignores HOME, so
+# without this the smoke test reads, appends to — and (at the end of the run)
+# clears! — the developer's real download history.
+os.environ["USERPROFILE"] = _TMP_HOME
+os.environ["HOMEDRIVE"], os.environ["HOMEPATH"] = os.path.splitdrive(_TMP_HOME)
 os.environ["QT_QPA_PLATFORM"] = "offscreen"
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -343,7 +350,55 @@ def main() -> None:
     ), "history clear should confirm first")
     check(hist._history_list.count() == 0, "history should be empty after clear")
 
+    # --- About dialog + background yt-dlp update check -----------------------
+    # The check must never hit the network during a smoke run and must never
+    # block the dialog; the PyPI lookup is faked and the worker is driven by
+    # hand. Regression: it used to run urlopen() on the GUI thread and compare
+    # versions with "!=" (advertising downgrades).
+    from PySide6.QtCore import QTimer
+    from PySide6.QtWidgets import QLabel
+
+    from app import update_check
+
+    class _FakePypiResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def read(self):
+            return b'{"info": {"version": "99.9.9"}}'
+
+    real_urlopen = update_check.urllib.request.urlopen
+    update_check.urllib.request.urlopen = lambda url, timeout=None: _FakePypiResponse()
+    try:
+        notice = QLabel("")
+        notice.hide()
+        w._start_update_check(notice, "1.0")
+        for _ in range(60):  # the worker delivers on the GUI thread
+            pump()
+            if notice.text():
+                break
+            time.sleep(0.05)
+        check("99.9.9" in notice.text(),
+              f"update notice should show the newer version, got {notice.text()!r}")
+        check(not notice.isHidden(), "update notice should become visible")
+
+        # The dialog itself must open (and start the check) without blocking
+        QTimer.singleShot(300, lambda: (QApplication.activeModalWidget() or w).close())
+        w._show_about()
+        check(w._about_update_target is None,
+              "About dialog should drop its update target when it closes")
+    finally:
+        update_check.urllib.request.urlopen = real_urlopen
+
+    # A late worker answer after the dialog closed must be ignored, not crash
+    w._show_update_notice("99.9.9")
+
     pump()
+    # Drop the throwaway home dir (history + archive written above).
+    shutil.rmtree(_TMP_HOME, ignore_errors=True)
     print("SMOKE OK")
 
 

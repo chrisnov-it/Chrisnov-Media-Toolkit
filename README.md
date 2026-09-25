@@ -192,6 +192,10 @@ Building standalone executables, the project layout, and the internal architectu
 
 MIT License. See [LICENSE](LICENSE) for details.
 
+Bundled FFmpeg binaries (Windows bundled builds) and the Python dependencies
+are covered by their own licences — see
+[docs/THIRD-PARTY.md](docs/THIRD-PARTY.md).
+
 ---
 
 ## Panduan Pengguna (Bahasa Indonesia)

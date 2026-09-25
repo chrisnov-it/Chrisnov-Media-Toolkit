@@ -55,6 +55,55 @@ def test_load_legacy_playlist_payload_sanitized(tmp_path):
     assert [e["filename"] for e in h.entries] == ["Playlist", "Playlist"]
 
 
+def test_load_drops_non_dict_entries(tmp_path):
+    """A truncated/hand-edited file must not crash load() (or the app start)."""
+    p = tmp_path / "download-history.json"
+    p.write_text(
+        json.dumps({"version": 1, "items": ["oops", 42, None, {"url": "u"}]}),
+        encoding="utf-8",
+    )
+    h = DownloadHistory(p)
+    h.load()
+    assert h.entries == [{"url": "u"}]
+
+
+def test_load_coerces_bad_numeric_fields(tmp_path):
+    """filesize_bytes/timestamp are summed and int()-cast by the History tab,
+    so wrong types must be normalised at load time."""
+    p = tmp_path / "download-history.json"
+    p.write_text(
+        json.dumps({
+            "version": 1,
+            "items": [{
+                "url": "u", "filename": "f", "status": "completed",
+                "filesize_bytes": "big", "timestamp": "soon",
+            }],
+        }),
+        encoding="utf-8",
+    )
+    h = DownloadHistory(p)
+    h.load()
+    assert h.entries[0]["filesize_bytes"] == 0
+    assert h.entries[0]["timestamp"] == 0
+    # Values that are already correct stay untouched
+    assert h.entries[0]["filename"] == "f"
+
+
+def test_load_keeps_valid_numeric_fields(tmp_path):
+    p = tmp_path / "download-history.json"
+    p.write_text(
+        json.dumps({
+            "version": 1,
+            "items": [{"url": "u", "filesize_bytes": 2048, "timestamp": 1234}],
+        }),
+        encoding="utf-8",
+    )
+    h = DownloadHistory(p)
+    h.load()
+    assert h.entries[0]["filesize_bytes"] == 2048
+    assert h.entries[0]["timestamp"] == 1234
+
+
 def test_append_newest_first_and_persists(tmp_path):
     h = make_history(tmp_path)
     h.append(url="https://a", filepath="/x/a.mp3", filename="a.mp3",

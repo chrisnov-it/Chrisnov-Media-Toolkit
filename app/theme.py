@@ -182,6 +182,60 @@ QLineEdit, QComboBox, QListWidget, QDoubleSpinBox, QSpinBox {{
     color: {text};
     font-size: {fs};
 }}
+QListWidget::item {{
+    border-bottom: 1px solid {midlight};
+    padding: 2px 0px;
+}}
+QListWidget::item:selected {{
+    background: {highlight};
+    color: {highlighted_text};
+}}
+QScrollBar:vertical {{
+    background: transparent;
+    width: 10px;
+    margin: 0px;
+    border: none;
+}}
+QScrollBar::handle:vertical {{
+    background: {mid};
+    border-radius: 5px;
+    min-height: 24px;
+}}
+QScrollBar::handle:vertical:hover, QScrollBar::handle:vertical:pressed {{
+    background: {highlight};
+}}
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
+    height: 0px;
+    background: none;
+    border: none;
+}}
+QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{
+    background: none;
+    border: none;
+}}
+QScrollBar:horizontal {{
+    background: transparent;
+    height: 10px;
+    margin: 0px;
+    border: none;
+}}
+QScrollBar::handle:horizontal {{
+    background: {mid};
+    border-radius: 5px;
+    min-width: 24px;
+}}
+QScrollBar::handle:horizontal:hover, QScrollBar::handle:horizontal:pressed {{
+    background: {highlight};
+}}
+QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{
+    width: 0px;
+    background: none;
+    border: none;
+}}
+QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {{
+    background: none;
+    border: none;
+}}
 QPushButton {{
     min-height: 27px;
     padding: 3px 10px;

@@ -106,7 +106,7 @@ if is_macos:
         info_plist={
             'CFBundleName': 'Chrisnov Media Toolkit',
             'CFBundleDisplayName': 'Chrisnov Media Toolkit',
-            'CFBundleShortVersionString': os.environ.get('APP_VERSION', '0.2.0-beta.2'),
+            'CFBundleShortVersionString': os.environ.get('APP_VERSION', '0.2.0-beta.4'),
             'CFBundleVersion': os.environ.get('APP_BUILD_NUMBER', '1'),
             'NSHighResolutionCapable': True,
             # Advertise the minimum macOS we build for (must stay in sync with

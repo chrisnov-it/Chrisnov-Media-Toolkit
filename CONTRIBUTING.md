@@ -31,6 +31,28 @@ working.
    ```
 4. Open a pull request using the **Pull Request** template.
 
+### Tests and lint
+
+Install the dev tools once:
+
+```bash
+.venv/bin/pip install -r requirements-dev.txt
+# Windows: .venv\Scripts\pip install -r requirements-dev.txt
+```
+
+Run all three checks before opening a PR (CI runs the same commands on Linux
+**and** Windows):
+
+```bash
+.venv/bin/python -m ruff check .     # lint — config lives in ruff.toml
+.venv/bin/python -m pytest -v        # unit tests
+QT_QPA_PLATFORM=offscreen .venv/bin/python scripts/smoke_gui.py   # offscreen GUI smoke test
+```
+
+The smoke test redirects `HOME`/`XDG_CONFIG_HOME`/`USERPROFILE` to a temp
+directory before any Qt import: it must never read, append to, or clear your
+real `download-history.json`. Keep that isolation intact.
+
 ### Code style
 
 - Python 3.12+, PySide6, typed.

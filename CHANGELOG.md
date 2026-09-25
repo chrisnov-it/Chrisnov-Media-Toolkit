@@ -4,6 +4,123 @@ All notable changes to this project are documented here.
 
 ---
 
+## [0.2.0-beta.4] — 2026-09-25
+
+### Fixed
+
+- **App could refuse to start after a corrupted `download-history.json`**
+  `DownloadHistory.load()` only verified that `items` was a list and then
+  called `.get()` on every element, so a truncated write, a cloud-sync
+  conflict, or a hand-edited file containing a scalar raised `AttributeError`
+  straight out of `MainWindow.__init__` — the app died before showing a window.
+  Non-dict entries are now dropped, and wrong-typed `filesize_bytes` /
+  `timestamp` values are normalised (the History tab sums and `int()`-casts
+  both, so a string there crashed rendering with `TypeError`). Guarded by
+  three new `tests/test_history.py` cases.
+
+- **`scripts/smoke_gui.py` appended to — and would have cleared — the real
+  download history on Windows**
+  The isolation prelude only redirected `HOME`/`XDG_CONFIG_HOME`, but
+  `ntpath.expanduser()` reads `USERPROFILE` first, so the smoke test wrote its
+  fixture entries into the developer's real
+  `%USERPROFILE%\.config\chrisnov-media-toolkit\download-history.json`, then
+  failed its own "history should render 2 entries" check. Had the real history
+  been empty, the run would have ended by deleting real entries via Clear All.
+  `USERPROFILE`, `HOMEDRIVE`, and `HOMEPATH` are now redirected as well, and
+  the throwaway home directory is removed when the run finishes.
+
+- **Test suite was red on Windows** (`tests/test_ffmpeg_utils.py`)
+  `test_uses_pyinstaller_bundled_binary` created a `bin/ffmpeg` fixture while
+  `find_binary()` appends `.exe` on win32, so the lookup fell through to PATH
+  and the assertion failed. The fixture is platform-aware now, and the CI test
+  matrix runs on Windows as well as Linux.
+
+- **About dialog could freeze and advertise a downgrade**
+  The yt-dlp update check called `urllib.request.urlopen()` on the GUI thread
+  (blocking the dialog for up to the 3 s timeout) and compared versions with
+  `!=`, so a self-built or nightly yt-dlp was told to "update" downwards. The
+  request now runs in `UpdateCheckWorker` (`app/update_check.py`) and versions
+  are compared numerically — only a strictly newer release is reported.
+
+- **`version_info.txt` could embed a stale version**
+  The committed file still said `0.2.0-beta.2`/`(0, 2, 0, 2)` while
+  `APP_VERSION` had moved to `0.2.0-beta.3`, so a manual
+  `pyinstaller chrisnov-media-toolkit.spec` run produced executable metadata
+  that disagreed with the About dialog and the release tag. The file is
+  correct again, written ASCII-only (the copyright sign is a `\u00a9` escape),
+  `build-windows.ps1` now writes it without a BOM (Windows PowerShell 5.1 adds
+  one, which PyInstaller's parser rejects), and the new
+  `tests/test_version_metadata.py` fails if it ever drifts again.
+
+- **Converter/probe no longer flash a terminal window in the released builds**
+  The app is built with `console=False`, so on Windows every console-subsystem
+  child process gets a console window of its own. `app/ffmpeg_utils.py` spawned
+  ffprobe/ffmpeg without `CREATE_NO_WINDOW`: a console flashed whenever the
+  About dialog read the FFmpeg version and whenever a conversion was prepared,
+  and one stayed open for the whole encode or loudness scan. All four spawn
+  sites now pass `_no_window_kwargs()` (a no-op off Windows). yt-dlp already
+  hid its own ffmpeg children (`STARTUPINFO`/`STARTF_USESHOWWINDOW`), so the
+  downloader path was unaffected.
+
+- **Missing-FFmpeg hint named the wrong package manager**
+  `find_binary()` always suggested `sudo apt install ffmpeg`, including in the
+  Windows and macOS builds. The hint is per-platform now
+  (`winget install Gyan.FFmpeg` / `brew install ffmpeg`).
+
+### Added
+
+- **List-item separators and consistent minimal scrollbars** (`app/theme.py`)
+  Queue and history rows now carry a thin palette-derived divider
+  (`QListWidget::item` border in `midlight`, selected rows in
+  `highlight`/`highlighted-text`) so items stay readable in both Light and
+  Dark Mode with no hardcoded colors. Vertical and horizontal scrollbars
+  share one minimal 10 px style (transparent track, `mid` handle,
+  `highlight` on hover/press) across the Downloader, converter, and
+  History tabs.
+
+- **Live ETA on both converter progress bars** (`app/progress.py`,
+  `app/convert_tab.py`, `app/video_convert_tab.py`)
+  The workers already reported real FFmpeg progress; the bars now also show
+  a remaining-time estimate (`45% • ETA 00:32`, falling back to a bare
+  percent while no estimate exists yet). The new `EtaEstimator`
+  extrapolates wall-clock time over each worker's known range (single-pass
+  10–90, EBU R128 two-pass 5–90, video 10–90), rebases cleanly on the video
+  worker's AAC/Opus retry, and the bar format is only rewritten when the
+  displayed string changes. Covered by `tests/test_progress.py`.
+
+- **`app/update_check.py`** — Qt-light yt-dlp release check with pure
+  `version_key()` / `is_newer_version()` helpers (unit-tested in
+  `tests/test_update_check.py`) plus the worker the About dialog uses.
+- **`tests/test_version_metadata.py`** — keeps `version_info.txt` in sync with
+  `APP_VERSION` (version strings, numeric tuple, ASCII-only file).
+- **`ruff.toml`** — the lint baseline now lives in the repository instead of
+  depending on each developer's personal configuration, so
+  `ruff check .` reports the same findings everywhere. `main.py` was cleaned up
+  to keep the baseline at zero.
+- **`requirements.txt` / `requirements-dev.txt`** — pinned runtime and dev
+  dependencies, so a fresh checkout, the CI job, and release builds all
+  resolve the same versions (the project still has no `pyproject.toml`).
+- **CI: Windows and Linux test matrix** running lint, `pytest`, and the
+  offscreen GUI smoke test, plus a step asserting the smoke test never created
+  a real user config directory.
+- **`docs/THIRD-PARTY.md`** — licence obligations for the bundled GPL FFmpeg
+  binaries and the Python dependencies.
+- **FFmpeg archive verification and licence handling in
+  `build-windows.ps1`** — the downloaded archive is checked against the
+  release's published `checksums.sha256` before it is embedded, reusing the
+  FFmpeg found on the build host now logs a provenance/licence warning, and the
+  archive's licence text is saved as `bin\FFMPEG-LICENSE.txt`. The bundled ZIP
+  (`build-windows.yml`) and the installer's optional FFmpeg component ship that
+  file when it exists.
+
+### Changed
+
+- Download history is sanitised when it is loaded, so a damaged
+  `download-history.json` degrades to "some entries missing" instead of
+  preventing the app from starting.
+
+---
+
 ## [0.2.0-beta.3] — 2026-09-14
 
 ### Added

@@ -10,11 +10,22 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
-    name: pytest
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
+    name: pytest + smoke (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        # Windows runs on purpose: Path.home()/ntpath and the PyInstaller
+        # binary lookups behave differently there, and a Linux-only job
+        # silently accepted a test that only passed on Linux.
+        os: [ubuntu-latest, windows-latest]
 
     steps:
       - name: Check out repository
@@ -27,12 +38,40 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install ffmpeg, ffprobe, and dev deps
+      - name: Install Qt runtime libraries (Linux)
+        if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y ffmpeg
+          sudo apt-get install -y libegl1 libxkbcommon-x11-0 libxcb-cursor0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 libxcb-shape0 libxcb-xinerama0 libxcb-xinput0
+
+      - name: Install FFmpeg (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get install -y ffmpeg
+
+      - name: Install FFmpeg (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: choco install ffmpeg --no-progress -y
+
+      - name: Install Python dependencies
+        run: |
           python -m pip install --upgrade pip
-          pip install PySide6 yt-dlp curl_cffi pytest
+          pip install -r requirements-dev.txt
+
+      - name: Lint (ruff)
+        run: python -m ruff check .
 
       - name: Run pytest
         run: pytest -v
+
+      - name: Run offscreen GUI smoke test
+        run: python scripts/smoke_gui.py
+
+      - name: Assert the smoke test never touched a real user config
+        # scripts/smoke_gui.py redirects HOME/XDG_CONFIG_HOME/USERPROFILE to a
+        # temp dir. If that isolation regresses, the run would append to - and
+        # at the end clear - the developer's real download history.
+        run: >-
+          python -c "import os, pathlib, sys;
+          p = pathlib.Path(os.environ.get('USERPROFILE') or pathlib.Path.home()) / '.config' / 'chrisnov-media-toolkit';
+          sys.exit(f'smoke test polluted {p}' if p.exists() else 0)"

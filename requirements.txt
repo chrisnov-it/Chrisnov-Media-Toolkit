@@ -1,0 +1,7 @@
+# Runtime dependencies (no pyproject.toml/setup.py in this project — these are
+# installed straight into .venv). Pinned so that a local install, the CI test
+# job, and the release builds all resolve the same versions; bump deliberately
+# and re-run the tests.
+PySide6==6.11.2
+yt-dlp==2026.8.19
+curl_cffi==0.16.3
