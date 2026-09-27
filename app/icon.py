@@ -3,16 +3,15 @@
 from pathlib import Path
 
 from PySide6.QtCore import QByteArray, QSize, Qt
-from PySide6.QtGui import QIcon, QPainter, QPalette, QPixmap
+from PySide6.QtGui import QBrush, QColor, QIcon, QPainter, QPalette, QPixmap
 from PySide6.QtSvg import QSvgRenderer
+from PySide6.QtWidgets import QListWidgetItem
+
+from .constants import NEUTRAL_GRAY
 
 
-def load_svg_icon(path: Path, size: int = 256) -> QIcon:
-    """Render an SVG file to a QIcon. Returns an empty QIcon on failure."""
-    try:
-        data = QByteArray(path.read_bytes())
-    except OSError:
-        return QIcon()
+def _render_svg(data: QByteArray, size: int) -> QIcon:
+    """Render SVG data into a square QIcon of *size*. Empty QIcon on failure."""
     renderer = QSvgRenderer(data)
     if not renderer.isValid():
         return QIcon()
@@ -22,6 +21,15 @@ def load_svg_icon(path: Path, size: int = 256) -> QIcon:
     renderer.render(painter)
     painter.end()
     return QIcon(pix)
+
+
+def load_svg_icon(path: Path, size: int = 256) -> QIcon:
+    """Render an SVG file to a QIcon. Returns an empty QIcon on failure."""
+    try:
+        data = QByteArray(path.read_bytes())
+    except OSError:
+        return QIcon()
+    return _render_svg(data, size)
 
 
 # ---------------------------------------------------------------------------
@@ -109,16 +117,9 @@ def bundled_icon(name: str, color: str, size: int = 64) -> QIcon:
     svg = _BUNDLED_ICON_SVGS.get(name)
     if svg is None:
         return QIcon()
-    data = QByteArray(svg.replace("__COLOR__", color).encode("utf-8"))
-    renderer = QSvgRenderer(data)
-    if not renderer.isValid():
-        return QIcon()
-    pix = QPixmap(QSize(size, size))
-    pix.fill(Qt.GlobalColor.transparent)
-    painter = QPainter(pix)
-    renderer.render(painter)
-    painter.end()
-    return QIcon(pix)
+    return _render_svg(
+        QByteArray(svg.replace("__COLOR__", color).encode("utf-8")), size
+    )
 
 
 # Palette → icon color (kept here so icon.py owns everything icon-related)
@@ -129,7 +130,7 @@ def palette_icon_color(palette: QPalette) -> str:
             QPalette.ColorGroup.Active, QPalette.ColorRole.WindowText
         ).name()
     except (SystemError, RuntimeError, ValueError):
-        return "#8a94a0"
+        return NEUTRAL_GRAY
 
 
 # Fixed colors for queue-row status marks. Unlike the tab icons these do
@@ -160,3 +161,25 @@ def queue_status_icon(status: str) -> QIcon:
     if name is None or color is None:
         return QIcon()
     return bundled_icon(name, color)
+
+
+def mark_status(item: QListWidgetItem | None, status: str,
+                tooltip: str = "") -> None:
+    """Paint a queue row with *status*'s icon, foreground color, and tooltip.
+
+    Shared by the download queue and both converter queues so a row always
+    reads the same (amber arrow = running, green check = done, red cross =
+    failed) whichever tab it lives in. A missing row (``None``) is a no-op:
+    queue edits are blocked mid-batch, so rows stay aligned with the batch
+    and a stale index simply means the batch already finished.
+    """
+    if item is None:
+        return
+    icon = queue_status_icon(status)
+    if not icon.isNull():
+        item.setIcon(icon)
+    color = STATUS_COLORS.get(status)
+    if color:
+        item.setForeground(QBrush(QColor(color)))
+    if tooltip:
+        item.setToolTip(tooltip)

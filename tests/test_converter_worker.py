@@ -15,24 +15,27 @@ from app.converter_worker import (
 
 class TestFFmpegDiscovery:
     """find_ffmpeg() / find_ffprobe() return a path when the binary is on
-    PATH, otherwise raise FileNotFoundError. Both outcomes are valid; we
-    only assert that the function doesn't return garbage."""
+    PATH, otherwise raise FileNotFoundError. Both outcomes are valid; a
+    successful return must be a non-empty path (find_binary() never
+    yields None), while the raise path is itself the contract."""
 
     def test_find_ffmpeg_handles_missing(self):
         # On a CI Ubuntu runner without ffmpeg, this raises FileNotFoundError;
         # with the binary available (developer machines) it returns a string.
         try:
             ff = find_ffmpeg()
-            assert ff is None or isinstance(ff, str)
         except FileNotFoundError:
-            pass
+            pass  # absent here — raising is the expected behavior
+        else:
+            assert isinstance(ff, str) and ff, f"garbage return: {ff!r}"
 
     def test_find_ffprobe_handles_missing(self):
         try:
             fp = find_ffprobe()
-            assert fp is None or isinstance(fp, str)
         except FileNotFoundError:
-            pass
+            pass  # absent here — raising is the expected behavior
+        else:
+            assert isinstance(fp, str) and fp, f"garbage return: {fp!r}"
 
 
 class TestCodecArgs:
@@ -101,6 +104,44 @@ class TestCodecArgs:
         assert ar_count == 1, f"-ar appears {ar_count} times in full args: {full}"
 
 
+class TestBuildCmdAndPartialCleanup:
+    """-nostdin on every ffmpeg invocation, plus partial-output cleanup."""
+
+    def test_audio_build_cmd_has_nostdin_before_input(self):
+        from app.converter_worker import ConvertWorker
+        w = ConvertWorker.__new__(ConvertWorker)
+        w.src = "in.mp3"
+        w.fmt = "mp3"
+        w.cbr = True
+        w.bitrate = 192
+        w.sample_rate = None
+        cmd = w._build_cmd("/bin/ffmpeg", "out.mp3", [], None)
+        assert "-nostdin" in cmd, f"audio cmd must disable stdin: {cmd}"
+        assert cmd.index("-nostdin") < cmd.index("-i")
+
+    def test_video_build_cmd_has_nostdin_before_input(self):
+        from app.converter_worker import VideoConvertWorker
+        w = VideoConvertWorker.__new__(VideoConvertWorker)
+        w.src = "in.mp4"
+        w.fmt = "mp4"
+        w.quality = "balanced"
+        w.copy_audio = True
+        cmd = w._build_cmd("/bin/ffmpeg", "out.mp4")
+        assert "-nostdin" in cmd, f"video cmd must disable stdin: {cmd}"
+        assert cmd.index("-nostdin") < cmd.index("-i")
+
+    def test_remove_partial_deletes_file(self, tmp_path):
+        from app.converter_worker import _remove_partial
+        partial = tmp_path / "partial.mp3"
+        partial.write_text("half a file")
+        _remove_partial(partial)
+        assert not partial.exists()
+
+    def test_remove_partial_tolerates_missing_file(self, tmp_path):
+        from app.converter_worker import _remove_partial
+        _remove_partial(tmp_path / "never-existed.mp3")  # must not raise
+
+
 class TestProbeDuration:
     def test_probe_duration_returns_none_for_missing_file(self, tmp_path):
         # If ffprobe isn't available on this runner (e.g. CI Ubuntu image),
@@ -116,10 +157,12 @@ class TestProbeDuration:
 
     def test_probe_duration_works_on_real_file(self, tmp_path):
         import subprocess
-        ffmpeg = find_ffmpeg()
-        ffprobe = find_ffprobe()
-
-        if not ffmpeg or not ffprobe:
+        try:
+            ffmpeg = find_ffmpeg()
+            ffprobe = find_ffprobe()
+        except FileNotFoundError:
+            # find_* raise rather than return a falsy value, so the missing
+            # case must be caught here or the test errors instead of skipping.
             pytest.skip("ffmpeg/ffprobe not available on this system")
 
         wav = tmp_path / "tone.wav"
@@ -132,6 +175,75 @@ class TestProbeDuration:
         dur = probe_duration(ffprobe, wav)
         assert dur is not None
         assert 1.9 <= dur <= 2.1, f"expected ~2.0s, got {dur}"
+
+
+class TestCancelDuringProbe:
+    """Cancelling while ffprobe runs must stop the worker before it spawns
+    ffmpeg. probe_duration() now takes a cancel hook and exposes its child,
+    which is what lets the GUI's Cancel return immediately instead of falling
+    back to QThread.terminate()."""
+
+    @staticmethod
+    def _patch(monkeypatch, cw, worker, tmp_path):
+        """Fake the binary lookups; simulate a cancel arriving mid-probe."""
+        monkeypatch.setattr(cw, "find_ffmpeg", lambda: "/usr/bin/ffmpeg")
+        monkeypatch.setattr(cw, "find_ffprobe", lambda: "/usr/bin/ffprobe")
+        resolved = []
+
+        def fake_probe(ffprobe, src, **kwargs):
+            assert kwargs.get("cancelled") is not None, \
+                "probe_duration() must receive a cancel hook"
+            assert kwargs.get("set_process") is not None, \
+                "probe_duration() must expose its child process to cancel()"
+            worker.cancel()  # the user presses Cancel while ffprobe runs
+            return None
+
+        monkeypatch.setattr(cw, "probe_duration", fake_probe)
+        monkeypatch.setattr(
+            cw, "resolve_output_path",
+            lambda *a, **k: resolved.append(a) or tmp_path / "out",
+        )
+        return resolved
+
+    @staticmethod
+    def _observe(worker):
+        seen = {"status": [], "failed": [], "ok": []}
+        worker.status.connect(seen["status"].append)
+        worker.failed.connect(seen["failed"].append)
+        worker.finished_ok.connect(seen["ok"].append)
+        return seen
+
+    def test_audio_worker_stops_after_cancelled_probe(self, monkeypatch, tmp_path):
+        from app import converter_worker as cw
+
+        src = tmp_path / "in.mp3"
+        src.write_text("x", encoding="utf-8")
+        worker = cw.ConvertWorker(src=src, outdir=tmp_path, fmt="mp3")
+        resolved = self._patch(monkeypatch, cw, worker, tmp_path)
+        seen = self._observe(worker)
+
+        worker.run()
+
+        assert seen["status"] == ["Cancelled."]
+        assert seen["failed"] == []
+        assert seen["ok"] == []
+        assert resolved == [], "a cancelled worker must not resolve an output path"
+
+    def test_video_worker_stops_after_cancelled_probe(self, monkeypatch, tmp_path):
+        from app import converter_worker as cw
+
+        src = tmp_path / "in.mp4"
+        src.write_text("x", encoding="utf-8")
+        worker = cw.VideoConvertWorker(src=src, outdir=tmp_path, fmt="mp4")
+        resolved = self._patch(monkeypatch, cw, worker, tmp_path)
+        seen = self._observe(worker)
+
+        worker.run()
+
+        assert seen["status"] == ["Cancelled."]
+        assert seen["failed"] == []
+        assert seen["ok"] == []
+        assert resolved == [], "a cancelled worker must not resolve an output path"
 
 
 class TestInputExtensions:

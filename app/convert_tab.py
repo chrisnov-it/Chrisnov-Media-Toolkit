@@ -11,8 +11,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from pathlib import Path
 
-from PySide6.QtCore import QSize, Qt
-from PySide6.QtGui import QBrush, QColor
+from PySide6.QtCore import QSize, Qt, QThread
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QButtonGroup,
@@ -42,15 +41,18 @@ from .converter_worker import (
 )
 from .converter_worker import (
     DEFAULT_LUFS,
+    DEFAULT_TRUE_PEAK,
+    EBU_PROGRESS_BAND,
     OUTPUT_FORMATS,
+    PROGRESS_BAND,
     SAMPLE_RATES,
     SUPPORTED_INPUT_EXTENSIONS,
     ConvertWorker,
 )
-from .icon import STATUS_COLORS, queue_status_icon
+from .icon import mark_status
 from .progress import EtaEstimator
 from .settings import AppSettings
-from .utils import open_in_explorer
+from .utils import open_in_explorer, scan_media_files
 from .worker_tracking import WorkerTracker
 
 
@@ -71,6 +73,7 @@ class AudioConverterTab(QWidget):
         self._conv_total = 0
         self._conv_done = 0
         self._conv_active = False
+        self._conv_clean_tags: list[str] | None = None  # snapshotted at start
         self._eta = EtaEstimator()
         self._eta_format = "%p%"
         self._build_ui()
@@ -218,7 +221,7 @@ class AudioConverterTab(QWidget):
         self.conv_peak_spin  = QDoubleSpinBox()
         self.conv_peak_spin.setRange(-12.0, 0.0)
         self.conv_peak_spin.setSingleStep(0.5)
-        self.conv_peak_spin.setValue(-1.0)
+        self.conv_peak_spin.setValue(DEFAULT_TRUE_PEAK)
         self.conv_peak_spin.setSuffix(" dBTP")
         norm_layout.addWidget(self.conv_peak_label, 0, 5)
         norm_layout.addWidget(self.conv_peak_spin, 0, 6)
@@ -280,6 +283,18 @@ class AudioConverterTab(QWidget):
 
         self._on_conv_fmt_changed(self.conv_fmt_combo.currentText())
 
+        # Controls _conv_kick_next() reads per item. They are frozen for the
+        # whole batch (see _conv_freeze_settings) so item 2 cannot run with
+        # different settings — or a different output folder — than item 1.
+        self._conv_settings_widgets = [
+            self.conv_fmt_combo, self.conv_bitrate_combo, self.conv_sr_combo,
+            self.conv_cbr_radio, self.conv_vbr_radio,
+            self.conv_norm_none, self.conv_norm_ebu, self.conv_norm_peak,
+            self.conv_lufs_spin, self.conv_peak_spin,
+            self.conv_trim_chk, self.conv_clean_chk,
+            self.conv_dir_input, conv_browse_btn,
+        ]
+
     # ------------------------------------------------------------------ #
     #  File list helpers                                                   #
     # ------------------------------------------------------------------ #
@@ -290,19 +305,12 @@ class AudioConverterTab(QWidget):
 
     def _mark_conv_item(self, row: int, status: str,
                         tooltip: str = "") -> None:
-        """Give a file row its batch status: amber arrow = running, green
-        check = done, red cross = failed (+ optional tooltip)."""
-        item = self.conv_file_list.item(row)
-        if item is None:
-            return
-        icon = queue_status_icon(status)
-        if not icon.isNull():
-            item.setIcon(icon)
-        color = STATUS_COLORS.get(status)
-        if color:
-            item.setForeground(QBrush(QColor(color)))
-        if tooltip:
-            item.setToolTip(tooltip)
+        """Give a file row its batch status (icon + color + tooltip).
+
+        The painting is shared with the download and video queues via
+        icon.mark_status(), so all three read identically.
+        """
+        mark_status(self.conv_file_list.item(row), status, tooltip)
 
     def _conv_add_file(self, path: Path) -> None:
         """Add a single file to the converter queue (dedup by path)."""
@@ -319,13 +327,22 @@ class AudioConverterTab(QWidget):
         self._refresh_conv_empty()
 
     def _conv_add_folder(self, folder: Path) -> int:
-        """Add supported audio/video files from a folder tree."""
+        """Add supported audio/video files from a folder tree.
+
+        The walk is bounded (app/utils.scan_media_files) because it runs on
+        the GUI thread: an unbounded rglob over a huge or network folder used
+        to freeze the window until the whole tree had been visited.
+        """
+        files, truncated = scan_media_files(folder, SUPPORTED_INPUT_EXTENSIONS)
         added = 0
-        for path in sorted(p for p in folder.rglob("*") if p.is_file()):
+        for path in files:
             before = len(self._conv_files)
             self._conv_add_file(path)
             added += int(len(self._conv_files) > before)
-        self.conv_status_label.setText(f"Added {added} file(s) from folder.")
+        msg = f"Added {added} file(s) from folder."
+        if truncated:
+            msg += " Scan limit reached — the folder tree was only partly added."
+        self.conv_status_label.setText(msg)
         return added
 
     def _conv_browse_files(self) -> None:
@@ -411,6 +428,13 @@ class AudioConverterTab(QWidget):
         self._conv_total  = len(self._conv_queue)
         self._conv_done   = 0
         self._conv_active = True
+        self._conv_freeze_settings(True)
+        # Snapshot the shared cleanup-tag list: editing it in the Downloader
+        # tab mid-batch must not change what later items in this batch do.
+        self._conv_clean_tags = (
+            parse_tag_list(self._tags_provider())
+            if self.conv_clean_chk.isChecked() else None
+        )
 
         self.conv_start_btn.setEnabled(False)
         self.conv_cancel_btn.setEnabled(True)
@@ -419,7 +443,24 @@ class AudioConverterTab(QWidget):
             btn.setEnabled(False)
         self._conv_kick_next()
 
+    def _conv_freeze_settings(self, frozen: bool) -> None:
+        """Enable/disable the settings widgets _conv_kick_next() reads.
+
+        They are disabled while a batch runs: left editable, the format,
+        bitrate, normalisation or output-folder controls could change
+        between two items, so one batch would convert with mixed settings
+        and scatter outputs over several folders. Only enabled state moves —
+        the show/hide rules in _on_conv_fmt_changed/_update_norm_ui are
+        untouched.
+        """
+        for wdg in self._conv_settings_widgets:
+            wdg.setEnabled(not frozen)
+
     def _conv_kick_next(self) -> None:
+        if not self._conv_active:
+            # Cancelled (or shutdown) while a finished/failed event was still
+            # queued: never start another worker behind the user's back.
+            return
         if self._conv_idx >= self._conv_total:
             self.conv_status_label.setText(
                 f"Done: {self._conv_done}/{self._conv_total} converted."
@@ -444,19 +485,17 @@ class AudioConverterTab(QWidget):
         else:
             norm_mode = "none"
 
-        clean_tags = None
-        if self.conv_clean_chk.isChecked():
-            clean_tags = parse_tag_list(self._tags_provider())
+        clean_tags = self._conv_clean_tags  # snapshotted in _conv_start
 
         self.conv_status_label.setText(f"{idx_label} Preparing {src.name}...")
         self.conv_progress.setValue(0)
         self._eta_format = "%p%"
         self.conv_progress.setFormat(self._eta_format)
         if norm_mode == "ebu":
-            # Two-pass loudnorm spans 5-90 (scan 5-40, encode 40-90).
-            self._eta.reset(5, 90)
+            # Two-pass loudnorm spans EBU_PROGRESS_BAND (scan 5-40, encode 40-90).
+            self._eta.reset(*EBU_PROGRESS_BAND)
         else:
-            self._eta.reset(10, 90)
+            self._eta.reset(*PROGRESS_BAND)
         self._mark_conv_item(self._conv_idx, "running")
 
         self._conv_worker = ConvertWorker(
@@ -494,6 +533,8 @@ class AudioConverterTab(QWidget):
             self.conv_progress.setFormat(fmt)
 
     def _on_conv_ok(self, out_path: str) -> None:
+        if not self._conv_active:
+            return
         name = Path(out_path).name
         self.conv_status_label.setText(
             f"[{self._conv_idx + 1}/{self._conv_total}] Done → {name}"
@@ -504,6 +545,8 @@ class AudioConverterTab(QWidget):
         self._conv_kick_next()
 
     def _on_conv_fail(self, msg: str) -> None:
+        if not self._conv_active:
+            return
         self.conv_status_label.setText(
             f"[{self._conv_idx + 1}/{self._conv_total}] Error: {msg}"
         )
@@ -512,21 +555,25 @@ class AudioConverterTab(QWidget):
         self._conv_kick_next()
 
     def _conv_cancel(self) -> None:
-        if self._conv_worker and self._conv_worker.isRunning():
-            # Disconnect signals first so an in-flight finished_ok/failed
-            # callback can't call _conv_kick_next() on the already-reset
-            # state (mirrors the downloader's cancel).
+        """Stop the queue without blocking the GUI thread.
+
+        cancel() sets the flag and terminates the live ffmpeg/ffprobe child,
+        so the worker winds down on its own; waiting for it here would freeze
+        the UI for seconds and terminate() on a thread inside Python or
+        subprocess code can deadlock the process. Signals are disconnected
+        first so an already-queued finished_ok/failed event does nothing —
+        the _conv_active guards in the handlers cover the rest.
+        """
+        worker = self._conv_worker
+        if worker is not None:
             try:
-                self._conv_worker.progress.disconnect()
-                self._conv_worker.status.disconnect()
-                self._conv_worker.finished_ok.disconnect()
-                self._conv_worker.failed.disconnect()
+                worker.progress.disconnect()
+                worker.status.disconnect()
+                worker.finished_ok.disconnect()
+                worker.failed.disconnect()
             except RuntimeError:
                 pass
-            self._conv_worker.cancel()
-            if not self._conv_worker.wait(3000):
-                self._conv_worker.terminate()
-                self._conv_worker.wait(1000)
+            worker.cancel()
             self.conv_status_label.setText("Cancelled.")
         self._conv_reset()
 
@@ -534,6 +581,8 @@ class AudioConverterTab(QWidget):
         self._conv_files.clear()
         self.conv_file_list.clear()
         self._refresh_conv_empty()
+        self._conv_clean_tags = None
+        self._conv_freeze_settings(False)
         self._eta_format = "%p%"
         self.conv_progress.setFormat(self._eta_format)
         self.conv_start_btn.setEnabled(True)
@@ -543,3 +592,15 @@ class AudioConverterTab(QWidget):
             btn.setEnabled(True)
         self._conv_worker = None
         self._conv_active = False
+
+    # ------------------------------------------------------------------ #
+    #  Shutdown — MainWindow.closeEvent polls these until they return []     #
+    # ------------------------------------------------------------------ #
+
+    def running_workers(self) -> list[QThread]:
+        """Workers still inside run() (see WorkerTracker.running)."""
+        return self._tracker.running()
+
+    def shutdown(self) -> None:
+        """Cancel any conversion when the window closes (idempotent)."""
+        self._conv_cancel()

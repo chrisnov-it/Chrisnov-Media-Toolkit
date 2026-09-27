@@ -23,6 +23,8 @@ import sys
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QPalette
 
+from .constants import NEUTRAL_GRAY
+
 
 def enable_high_dpi() -> None:
     """Enable HiDPI screen scaling before QApplication is created.
@@ -95,7 +97,7 @@ def _palette_color(palette: QPalette, role: QPalette.ColorRole) -> str:
         return c.name()
     except (SystemError, RuntimeError, ValueError):
         # Fallback: use a generic gray to avoid crashes during theme transitions
-        return "#8a94a0"
+        return NEUTRAL_GRAY
 
 
 def widget_stylesheet(palette: QPalette | None = None) -> str:

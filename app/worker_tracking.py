@@ -34,3 +34,8 @@ class WorkerTracker:
         # w stays bound to the tracked worker (positional bind would clobber
         # it and break the identity-based set discard).
         worker.destroyed.connect(lambda *_, w=worker: self._tracked.discard(w))
+
+    def running(self) -> list[QThread]:
+        """Workers still executing run() — the shutdown poll in MainWindow
+        waits on these before letting the last window close."""
+        return [w for w in self._tracked if w.isRunning()]

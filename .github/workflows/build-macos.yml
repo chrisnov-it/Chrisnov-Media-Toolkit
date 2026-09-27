@@ -12,6 +12,11 @@ on:
     tags:
       - "v*"
 
+# Default token access for every job (the release job overrides it with
+# contents: write, which is what it needs to create the release).
+permissions:
+  contents: read
+
 jobs:
   build:
     name: macOS ${{ matrix.arch }} Lite ZIP
@@ -55,16 +60,27 @@ jobs:
       - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
-          # curl_cffi: required for the impersonate option (Instagram/Vimeo
-          # private downloads with cookies). Must be installed at build time
-          # so PyInstaller bundles it into the executable.
-          python -m pip install PySide6 yt-dlp curl_cffi pyinstaller==6.17.0 --only-binary=:all:
+          # Runtime deps from requirements.txt: release builds must resolve
+          # exactly the pinned versions the CI test job validated (yt-dlp,
+          # PySide6, curl_cffi). curl_cffi is required for the impersonate
+          # option (Instagram/Vimeo private downloads with cookies) and must
+          # be installed at build time so PyInstaller bundles it. The wheel
+          # requirement keeps the macOS build from compiling anything.
+          python -m pip install --only-binary=:all: -r requirements.txt
+          python -m pip install --only-binary=:all: pyinstaller==6.17.0
 
       - name: Prepare build metadata
         run: |
+          set -euo pipefail
           VERSION="${APP_VERSION_RAW#v}"
-          echo "APP_VERSION=${VERSION}" >> "$GITHUB_ENV"
-          echo "APP_BUILD_NUMBER=${GITHUB_RUN_NUMBER}" >> "$GITHUB_ENV"
+          # Validate before it lands in GITHUB_ENV (a newline in it would
+          # inject extra variables) and in artifact names / version_info.txt.
+          if [[ ! "$VERSION" =~ ^[0-9][0-9A-Za-z._+-]*$ ]]; then
+            echo "::error::Unsupported version: $VERSION"
+            exit 1
+          fi
+          printf 'APP_VERSION=%s\n' "$VERSION" >> "$GITHUB_ENV"
+          printf 'APP_BUILD_NUMBER=%s\n' "$GITHUB_RUN_NUMBER" >> "$GITHUB_ENV"
 
       - name: Build unsigned macOS app
         run: |
@@ -107,10 +123,18 @@ jobs:
       - name: Normalize version tag
         shell: bash
         run: |
+          set -euo pipefail
           RAW="${APP_VERSION_RAW}"
+          # Reject anything but a plain version/tag before it is written to
+          # GITHUB_ENV (a newline in it would inject extra variables) and
+          # used as the release tag name.
+          if [[ ! "$RAW" =~ ^v?[0-9][0-9A-Za-z._+-]*$ ]]; then
+            echo "::error::Unsupported version/tag: $RAW"
+            exit 1
+          fi
           if [[ "$RAW" != v* ]]; then RAW="v$RAW"; fi
-          echo "TAG_NAME=$RAW" >> "$GITHUB_ENV"
-          echo "VERSION=${RAW#v}" >> "$GITHUB_ENV"
+          printf 'TAG_NAME=%s\n' "$RAW" >> "$GITHUB_ENV"
+          printf 'VERSION=%s\n' "${RAW#v}" >> "$GITHUB_ENV"
 
       - name: Download all build artifacts
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
@@ -121,7 +145,13 @@ jobs:
       - name: Prepare release metadata
         id: prep
         run: |
-          awk '/^## \['"$VERSION"'\]/{flag=1; next} /^## \[/{flag=0} flag' CHANGELOG.md > release_notes.md
+          set -euo pipefail
+          # The version is passed with -v instead of being spliced into the
+          # awk program text: the old '/^## \['"$VERSION"'\]/' form let a
+          # crafted tag inject awk code between the literals.
+          awk -v ver="$VERSION" \
+            'index($0, "## [" ver "]") == 1 {flag=1; next} /^## \[/ {flag=0} flag' \
+            CHANGELOG.md > release_notes.md
 
       - name: Create GitHub Release and upload assets
         uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3

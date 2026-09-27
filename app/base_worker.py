@@ -11,7 +11,13 @@ class CancellableWorker(QThread):
     Subclasses should:
     1. Call `super().__init__()` in their `__init__`
     2. Check `self._cancelled` periodically in long-running operations
-    3. Call `self.cancel()` to request cancellation (sets flag + optional process termination)
+       and abort cleanly when it flips
+    3. Override `cancel()` (calling `super().cancel()` first) when they own
+       a child process that must be terminated too — the converter workers
+       do this for their FFmpeg child
+
+    Cancellation is *requested* by the owning tab, not by the worker itself:
+    the GUI thread calls `worker.cancel()` and the worker winds down.
     """
 
     def __init__(self) -> None:

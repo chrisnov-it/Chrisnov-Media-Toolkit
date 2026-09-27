@@ -10,8 +10,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from pathlib import Path
 
-from PySide6.QtCore import QSize, Qt
-from PySide6.QtGui import QBrush, QColor
+from PySide6.QtCore import QSize, Qt, QThread
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
@@ -33,15 +32,16 @@ from PySide6.QtWidgets import (
 
 from .cleaner import parse_tag_list
 from .converter_worker import (
+    PROGRESS_BAND,
     VIDEO_INPUT_EXTENSIONS,
     VIDEO_OUTPUT_FORMATS,
     VIDEO_QUALITY_PRESETS,
     VideoConvertWorker,
 )
-from .icon import STATUS_COLORS, queue_status_icon
+from .icon import mark_status
 from .progress import EtaEstimator
 from .settings import AppSettings
-from .utils import open_in_explorer
+from .utils import open_in_explorer, scan_media_files
 from .worker_tracking import WorkerTracker
 
 
@@ -62,6 +62,7 @@ class VideoConvertTab(QWidget):
         self._video_conv_total = 0
         self._video_conv_done = 0
         self._video_conv_active = False
+        self._video_conv_clean_tags: list[str] | None = None  # snapshotted
         self._eta = EtaEstimator()
         self._eta_format = "%p%"
         self._build_ui()
@@ -170,15 +171,15 @@ class VideoConvertTab(QWidget):
             self._settings.saved_dir("convert_video", Path.home() / "Videos")
         )
         out_row.addWidget(self.video_conv_dir_input, 1)
-        browse_btn = QPushButton("Browse")
-        browse_btn.clicked.connect(self._video_conv_browse_dir)
-        out_row.addWidget(browse_btn)
-        video_open_btn = QPushButton("Open")
-        video_open_btn.setToolTip("Open the output folder in your file manager")
-        video_open_btn.clicked.connect(
+        video_conv_browse_btn = QPushButton("Browse")
+        video_conv_browse_btn.clicked.connect(self._video_conv_browse_dir)
+        out_row.addWidget(video_conv_browse_btn)
+        video_conv_open_btn = QPushButton("Open")
+        video_conv_open_btn.setToolTip("Open the output folder in your file manager")
+        video_conv_open_btn.clicked.connect(
             lambda: open_in_explorer(self.video_conv_dir_input.text().strip())
         )
-        out_row.addWidget(video_open_btn)
+        out_row.addWidget(video_conv_open_btn)
         root.addLayout(out_row)
 
         # Convert / Cancel + Progress + Status
@@ -200,6 +201,15 @@ class VideoConvertTab(QWidget):
         self.video_conv_status_label = QLabel("Ready.")
         root.addWidget(self.video_conv_status_label)
 
+        # Controls _video_conv_kick_next() reads per item — frozen for the
+        # whole batch by _video_conv_freeze_settings() so one batch cannot
+        # convert with mixed settings or write to several folders.
+        self._video_conv_settings_widgets = [
+            self.video_conv_fmt_combo, self.video_conv_quality_combo,
+            self.video_conv_audio_copy_chk, self.video_conv_clean_chk,
+            self.video_conv_dir_input, video_conv_browse_btn,
+        ]
+
     # ------------------------------------------------------------------ #
     #  File list helpers                                                   #
     # ------------------------------------------------------------------ #
@@ -210,19 +220,12 @@ class VideoConvertTab(QWidget):
 
     def _mark_video_conv_item(self, row: int, status: str,
                               tooltip: str = "") -> None:
-        """Give a video row its batch status: amber arrow = running, green
-        check = done, red cross = failed (+ optional tooltip)."""
-        item = self.video_conv_file_list.item(row)
-        if item is None:
-            return
-        icon = queue_status_icon(status)
-        if not icon.isNull():
-            item.setIcon(icon)
-        color = STATUS_COLORS.get(status)
-        if color:
-            item.setForeground(QBrush(QColor(color)))
-        if tooltip:
-            item.setToolTip(tooltip)
+        """Give a video row its batch status (icon + color + tooltip).
+
+        The painting is shared with the download and audio queues via
+        icon.mark_status(), so all three read identically.
+        """
+        mark_status(self.video_conv_file_list.item(row), status, tooltip)
 
     def _video_conv_add_file(self, path: Path) -> None:
         if path in self._video_conv_files:
@@ -238,12 +241,22 @@ class VideoConvertTab(QWidget):
         self._refresh_video_conv_empty()
 
     def _video_conv_add_folder(self, folder: Path) -> int:
+        """Queue supported video files under a folder (bounded walk).
+
+        The scan runs on the GUI thread, so app/utils.scan_media_files caps
+        how much of the tree it will visit instead of letting an unbounded
+        rglob freeze the window.
+        """
+        files, truncated = scan_media_files(folder, VIDEO_INPUT_EXTENSIONS)
         added = 0
-        for path in sorted(p for p in folder.rglob("*") if p.is_file()):
+        for path in files:
             before = len(self._video_conv_files)
             self._video_conv_add_file(path)
             added += int(len(self._video_conv_files) > before)
-        self.video_conv_status_label.setText(f"Added {added} video file(s) from folder.")
+        msg = f"Added {added} video file(s) from folder."
+        if truncated:
+            msg += " Scan limit reached — the folder tree was only partly added."
+        self.video_conv_status_label.setText(msg)
         return added
 
     def _video_conv_browse_files(self) -> None:
@@ -308,6 +321,12 @@ class VideoConvertTab(QWidget):
         self._video_conv_total = len(self._video_conv_queue)
         self._video_conv_done = 0
         self._video_conv_active = True
+        self._video_conv_freeze_settings(True)
+        # Snapshot the shared cleanup-tag list (see the audio tab's note).
+        self._video_conv_clean_tags = (
+            parse_tag_list(self._tags_provider())
+            if self.video_conv_clean_chk.isChecked() else None
+        )
 
         self.video_conv_start_btn.setEnabled(False)
         self.video_conv_cancel_btn.setEnabled(True)
@@ -316,7 +335,21 @@ class VideoConvertTab(QWidget):
             btn.setEnabled(False)
         self._video_conv_kick_next()
 
+    def _video_conv_freeze_settings(self, frozen: bool) -> None:
+        """Enable/disable the settings widgets _video_conv_kick_next() reads.
+
+        Disabled for the duration of a batch: leaving format, quality, audio
+        copy, cleanup or the output folder editable mid-run let two items in
+        the same batch be converted with different settings.
+        """
+        for wdg in self._video_conv_settings_widgets:
+            wdg.setEnabled(not frozen)
+
     def _video_conv_kick_next(self) -> None:
+        if not self._video_conv_active:
+            # Cancelled (or shutdown) while a finished/failed event was still
+            # queued: never start another worker behind the user's back.
+            return
         if self._video_conv_idx >= self._video_conv_total:
             self.video_conv_status_label.setText(
                 f"Done: {self._video_conv_done}/{self._video_conv_total} converted."
@@ -327,15 +360,13 @@ class VideoConvertTab(QWidget):
 
         src = self._video_conv_queue[self._video_conv_idx]
         idx_label = f"[{self._video_conv_idx + 1}/{self._video_conv_total}]"
-        clean_tags = None
-        if self.video_conv_clean_chk.isChecked():
-            clean_tags = parse_tag_list(self._tags_provider())
+        clean_tags = self._video_conv_clean_tags  # snapshotted at start
 
         self.video_conv_status_label.setText(f"{idx_label} Preparing {src.name}...")
         self.video_conv_progress.setValue(0)
         self._eta_format = "%p%"
         self.video_conv_progress.setFormat(self._eta_format)
-        self._eta.reset(10, 90)
+        self._eta.reset(*PROGRESS_BAND)
         self._mark_video_conv_item(self._video_conv_idx, "running")
 
         self._video_conv_worker = VideoConvertWorker(
@@ -368,9 +399,11 @@ class VideoConvertTab(QWidget):
             self.video_conv_progress.setFormat(fmt)
 
     def _on_video_conv_ok(self, out_path: str) -> None:
+        if not self._video_conv_active:
+            return
         name = Path(out_path).name
         self.video_conv_status_label.setText(
-            f"[{self._video_conv_idx + 1}/{self._video_conv_total}] Done -> {name}"
+            f"[{self._video_conv_idx + 1}/{self._video_conv_total}] Done → {name}"
         )
         self._mark_video_conv_item(self._video_conv_idx, "done")
         self._video_conv_idx += 1
@@ -378,6 +411,8 @@ class VideoConvertTab(QWidget):
         self._video_conv_kick_next()
 
     def _on_video_conv_fail(self, msg: str) -> None:
+        if not self._video_conv_active:
+            return
         self.video_conv_status_label.setText(
             f"[{self._video_conv_idx + 1}/{self._video_conv_total}] Error: {msg}"
         )
@@ -386,21 +421,25 @@ class VideoConvertTab(QWidget):
         self._video_conv_kick_next()
 
     def _video_conv_cancel(self) -> None:
-        if self._video_conv_worker and self._video_conv_worker.isRunning():
-            # Disconnect signals first so an in-flight finished_ok/failed
-            # callback can't call _video_conv_kick_next() on the already-reset
-            # state (mirrors the downloader's cancel).
+        """Stop the queue without blocking the GUI thread.
+
+        cancel() sets the flag and terminates the live ffmpeg/ffprobe child,
+        so the worker winds down on its own; waiting for it here would freeze
+        the UI for seconds and terminate() on a thread inside Python or
+        subprocess code can deadlock the process. Signals are disconnected
+        first so an already-queued finished_ok/failed event does nothing —
+        the _video_conv_active guards in the handlers cover the rest.
+        """
+        worker = self._video_conv_worker
+        if worker is not None:
             try:
-                self._video_conv_worker.progress.disconnect()
-                self._video_conv_worker.status.disconnect()
-                self._video_conv_worker.finished_ok.disconnect()
-                self._video_conv_worker.failed.disconnect()
+                worker.progress.disconnect()
+                worker.status.disconnect()
+                worker.finished_ok.disconnect()
+                worker.failed.disconnect()
             except RuntimeError:
                 pass
-            self._video_conv_worker.cancel()
-            if not self._video_conv_worker.wait(3000):
-                self._video_conv_worker.terminate()
-                self._video_conv_worker.wait(1000)
+            worker.cancel()
             self.video_conv_status_label.setText("Cancelled.")
         self._video_conv_reset()
 
@@ -408,6 +447,8 @@ class VideoConvertTab(QWidget):
         self._video_conv_files.clear()
         self.video_conv_file_list.clear()
         self._refresh_video_conv_empty()
+        self._video_conv_clean_tags = None
+        self._video_conv_freeze_settings(False)
         self._eta_format = "%p%"
         self.video_conv_progress.setFormat(self._eta_format)
         self.video_conv_start_btn.setEnabled(True)
@@ -417,3 +458,15 @@ class VideoConvertTab(QWidget):
             btn.setEnabled(True)
         self._video_conv_worker = None
         self._video_conv_active = False
+
+    # ------------------------------------------------------------------ #
+    #  Shutdown — MainWindow.closeEvent polls these until they return []     #
+    # ------------------------------------------------------------------ #
+
+    def running_workers(self) -> list[QThread]:
+        """Workers still inside run() (see WorkerTracker.running)."""
+        return self._tracker.running()
+
+    def shutdown(self) -> None:
+        """Cancel any conversion when the window closes (idempotent)."""
+        self._video_conv_cancel()

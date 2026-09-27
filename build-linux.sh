@@ -12,13 +12,14 @@ OUT="dist/chrisnov-media-toolkit-lite"
 echo "==> Checking venv..."
 if [ ! -d "$VENV" ]; then
     echo "ERROR: .venv not found. Run setup first:"
-    echo "  python3 -m venv .venv && .venv/bin/pip install PySide6 yt-dlp"
+    echo "  python3 -m venv .venv && .venv/bin/pip install -r requirements.txt"
     exit 1
 fi
 
 echo "==> Installing PyInstaller..."
-# Pin to a known-good version to avoid CI surprise breakage.
-# Bump deliberately after local verification, not automatically.
+# Pin to the known-good version that requirements-dev.txt and the CI
+# workflows also use (keep them in sync). Bump deliberately after local
+# verification, not automatically.
 "$VENV/bin/pip" install -q pyinstaller==6.17.0
 
 echo "==> Cleaning previous build..."

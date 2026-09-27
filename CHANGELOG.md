@@ -4,6 +4,162 @@ All notable changes to this project are documented here.
 
 ---
 
+## [Unreleased]
+
+### Fixed
+
+- **Closing the app while a batch ran destroyed live worker threads (and left
+  ffmpeg running)**
+  `MainWindow` had no `closeEvent`, so quitting mid-download/mid-conversion tore
+  down QThreads that were still inside `run()` ("QThread: Destroyed while thread
+  is still running", possible abort) and left ffmpeg children orphaned mid-file.
+  `closeEvent` now calls an idempotent `shutdown()` on every tab that owns
+  workers, ignores the
+  close while `WorkerTracker.running()` is non-empty, and re-polls every 100 ms
+  (window greyed out, title shows "stopping…") until the workers exit — with a
+  10 s deadline before `terminate()` as a last resort. `aboutToQuit` is wired to
+  the same shutdown for quits that never send a close event.
+
+- **Cancel froze the GUI for up to 7 seconds and could deadlock the process**
+  The cancel slots blocked in `QThread.wait()` and then called `terminate()` on a
+  thread that can be inside Python or `subprocess` code — on Windows that risks a
+  GIL deadlock or a corrupted `.part` file. Cancel now disconnects the signals,
+  sets the flag, and returns immediately (same for the audio/video converter
+  tabs). The conversion workers' `probe_duration()` was the worst offender —
+  a plain `subprocess.run(timeout=30)` that cancellation could not interrupt —
+  and now runs through a poll loop that terminates (then kills) its ffprobe
+  child, so a cancel during the probe stops before ffmpeg is ever spawned.
+  The GUI-side `_conv_active` / `_batch` guards also stop an already-queued
+  `finished_ok`/`failed` event from silently starting the next item after a
+  cancel.
+
+- **One bad `stat()` could freeze the download queue until the user found Cancel**
+  `_on_item_ok` computed file sizes with an `exists()`-then-`stat()` race and
+  appended to the history model with no `try/finally`. Any exception escaped the
+  Qt slot, skipped `batch.idx += 1` / `_kick_next()`, and left the batch stuck
+  with Start disabled — invisible in a `--noconsole` build. Both completion
+  handlers now fence their bookkeeping and always advance; size reads go through
+  a TOCTOU-safe helper and failures are logged and surfaced in the status label.
+
+- **A crash mid-write could silently lose the entire download history**
+  `DownloadHistory.save()` truncated the JSON file in place, and `load()` reset
+  to `[]` on the resulting `JSONDecodeError` — the next append then overwrote
+  everything, with the `OSError` swallowed by a bare `pass`. The payload is now
+  written to a sibling `.tmp` and moved into place with `os.replace()`, the
+  previous file is kept as `.bak` and used as a fallback when the main file is
+  unreadable, the entry cap is applied at load time too, and a failed save
+  returns `False` and logs instead of pretending it worked.
+
+- **Dropping a non-UTF-8 file on the Downloader tab raised out of the drop
+  handler**
+  `Path.read_text()` failures were caught with `except OSError`, but
+  `UnicodeDecodeError` is a `ValueError` — dropping an mp3/mkv/pdf (easy to do in
+  a media toolkit) threw an uncaught exception and aborted the drop. The handler
+  now catches `(OSError, UnicodeError)` and simply ignores the file.
+
+- **Release builds did not use the pinned dependency versions**
+  The three build workflows installed `PySide6 yt-dlp curl_cffi` ad hoc while
+  `requirements.txt` pinned them for exactly this purpose, so releases resolved
+  whatever PyPI served on build day and validated a different dependency set than
+  the CI test job. They now install `-r requirements.txt` (PyInstaller keeps its
+  deliberate in-workflow pin).
+
+- **A new download silently reset the History search and type filter**
+  `HistoryTab.refresh()` defaulted its arguments to `""`/`"All"`, so whenever
+  `history_changed` fired (or Clear All ran) a search the user had typed was
+  thrown away. `None` now means "reuse what is in the widgets", and only an
+  explicit call passes new values.
+
+- **Declining the large-playlist confirmation emptied the queue**
+  The batch-reset path always cleared the URL list, so answering "No" to the
+  50+ entries dialog - or hitting a playlist-inspect error - discarded the URLs
+  the user had just queued. Validation and inspect failures now keep the queue
+  (`_reset_after_batch(clear_queue=False)`); it is cleared only when a batch
+  finishes or is cancelled.
+
+- **Title cleanup glued bracketed tags onto the word before them**
+  The bare-tag rule matched anywhere inside a word, turning
+  `Song[Official]` into `SongOfficial` (while `[Official] Video` was fine).
+  Word boundaries now apply on the side that touches a word character, so
+  `Song [Official]` cleans to `Song` but glued tags are left alone.
+
+- **Playlist cleanup could rename a file that was not part of the batch**
+  `discover_new_files()` only compared mtimes against the batch start, so a
+  pre-existing file touched during the batch passed as "new". It now also
+  requires the file's creation time (birth time, `st_ctime` on Windows) to
+  fall inside the window; Linux keeps the mtime-only behaviour.
+
+- **ffmpeg could stall waiting on the GUI's stdin**
+  Every ffmpeg/ffprobe invocation now gets `-nostdin`, so a build with a
+  console (or an accidental interactive prompt) can never block a conversion;
+  `run_ffmpeg_with_progress()` also clears its `set_process` hook in a
+  `finally`, and a failed conversion removes its partial output file.
+
+- **Unhandled exceptions left no trace in release builds**
+  `main()` installs a `sys.excepthook` first: it appends the traceback to
+  `~/.config/chrisnov-media-toolkit/crash.log` and, on the main thread, shows
+  a short dialog instead of the app silently continuing without a stack trace.
+
+- **A completed download whose file had vanished was logged as "completed"**
+  `_on_item_ok` now stats the resolved path and records a `failed` entry with
+  the error when the file is missing, so History and the queue summary report
+  `0/1 completed` instead of a green check over a file that does not exist.
+
+- **The About dialog froze the UI while reading the FFmpeg version**
+  The version probe now runs in a `_FFmpegVersionWorker` (off the GUI thread)
+  and fills the row when it answers; a late result for a reopened dialog is
+  dropped.
+
+- **Huge folder drops froze the converter tabs**
+  `Folder` used `Path.rglob("*")` + a full sort on the GUI thread, so pointing
+  at a large or network tree stalled the window for the whole walk. Both
+  converter tabs now use `app/utils.scan_media_files()`, a bounded `os.scandir`
+  walk (hidden entries and directory symlinks skipped, entry/file caps), and
+  report truncation instead of hanging.
+
+- **A batch could run with mixed settings or write to several folders**
+  The audio and video converter tabs freeze their settings widgets (and
+  snapshot the cleanup tags) for the whole batch, so changing format, quality,
+  normalization or destination mid-run can no longer split one queue across
+  inconsistent outputs.
+
+### Changed
+
+- **History polish** - the empty state distinguishes an empty history
+  ("No downloads yet") from a filter that hides everything ("No matching
+  entries"), the summary shows the total size for any non-empty history
+  (previously only GB/MB), and the missing-cleanup-tags warning tells the user
+  what to do instead of ending with "Returning.".
+
+- **CI and release hardening** - workflows declare
+  `permissions: contents: read`; the release `version` input is validated
+  against a strict pattern before it reaches `GITHUB_ENV`, artifact names or
+  the shell (awk reads it via `-v` instead of program-text splicing);
+  `build-windows.ps1` sanitizes the version written into `version_info.txt`
+  and verifies the FFmpeg download checksum (fail-closed, with an explicit
+  `ALLOW_UNVERIFIED_FFMPEG=1` escape hatch); `installer.nsi` only compiles the
+  optional FFmpeg component when `bin\ffmpeg.exe` and `bin\ffprobe.exe` are
+  actually present (and closes its preprocessor blocks with `!endif`); Windows
+  release `.sha256` files now carry `hash  filename` like the Linux/macOS
+  ones, so `sha256sum -c` accepts them.
+
+- **Tests** - the suite grew from 171 to 206 (`tests/test_utils.py` and
+  `tests/test_main_excepthook.py` are new), with regression coverage for every
+  fix above, exact-value assertions where checks were vacuous, and skip guards
+  that match how `find_ffmpeg()`/`find_ffprobe()` actually behave.
+
+### Documentation
+
+- README now names the Video Converter's checkbox as it really appears
+  (**Copy audio**), `docs/BUILDING.md` documents the local Windows outputs
+  (bare `.exe`s - CI produces the versioned zips) and the automatic
+  `icon.ico` rendering, the setup hints in `build-linux.sh` /
+  `build-windows.ps1` install `-r requirements.txt` (which pulls in the pinned
+  `curl_cffi`), the lost `## [0.1.0-beta.4]` header was restored in this file,
+  and `docs/OLD-MAC-WORKAROUND.md` relies on the venv's pinned PyInstaller.
+
+---
+
 ## [0.2.0-beta.4] — 2026-09-25
 
 ### Fixed
@@ -521,6 +677,8 @@ tests.
 - Added design spec for Download History.
 
 ---
+
+## [0.1.0-beta.4] - 2026-07-16
 
 ### Added
 

@@ -12,6 +12,11 @@ on:
     tags:
       - "v*"
 
+# Default token access for every job (the release job overrides it with
+# contents: write, which is what it needs to create the release).
+permissions:
+  contents: read
+
 jobs:
   build:
     name: Windows x64 Lite and Bundled EXE
@@ -40,15 +45,25 @@ jobs:
         run: |
           python -m venv .venv
           .\.venv\Scripts\python.exe -m pip install --upgrade pip
-          # curl_cffi: required for the impersonate option (Instagram/Vimeo
-          # private downloads with cookies). Must be installed at build time
-          # so PyInstaller bundles it into the executable.
-          .\.venv\Scripts\python.exe -m pip install PySide6 yt-dlp curl_cffi pyinstaller==6.17.0
+          # Runtime deps from requirements.txt: release builds must resolve
+          # exactly the pinned versions the CI test job validated (yt-dlp,
+          # PySide6, curl_cffi). curl_cffi is required for the impersonate
+          # option (Instagram/Vimeo private downloads with cookies) and must
+          # be installed at build time so PyInstaller bundles it.
+          .\.venv\Scripts\python.exe -m pip install -r requirements.txt
+          .\.venv\Scripts\python.exe -m pip install pyinstaller==6.17.0
 
       - name: Prepare build metadata
         shell: pwsh
         run: |
-          $version = "${env:APP_VERSION_RAW}".TrimStart("v")
+          $version = "$($env:APP_VERSION_RAW)".TrimStart("v")
+          # Validate before the value is written to GITHUB_ENV (a newline in
+          # it would inject extra variables) and reused in artifact names and
+          # version_info.txt.
+          if ($version -notmatch '^[0-9][0-9A-Za-z._+-]*$') {
+            Write-Host "::error::Unsupported version: $version"
+            exit 1
+          }
           "APP_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Append
 
       - name: Build Windows Lite and Bundled executables
@@ -77,9 +92,14 @@ jobs:
           if (Test-Path "bin\FFMPEG-LICENSE.txt") { $bundledPayload += "bin\FFMPEG-LICENSE.txt" }
           Compress-Archive -Path $bundledPayload -DestinationPath "dist\$bundledZip" -Force
 
-          # SHA256 for zips (primary download files)
-          (Get-FileHash -Algorithm SHA256 "dist\$liteZip").Hash    | Set-Content -Path "dist\$liteZip.sha256"
-          (Get-FileHash -Algorithm SHA256 "dist\$bundledZip").Hash | Set-Content -Path "dist\$bundledZip.sha256"
+          # SHA256 for zips (primary download files). Same "hash  filename"
+          # layout that sha256sum/shasum write for the tarball and macOS zips,
+          # so `sha256sum -c *.sha256` (git-bash, WSL, Linux) verifies these
+          # the same way — a bare hash alone is not checkable with -c.
+          $liteHash    = (Get-FileHash -Algorithm SHA256 "dist\$liteZip").Hash
+          $bundledHash = (Get-FileHash -Algorithm SHA256 "dist\$bundledZip").Hash
+          "$liteHash  $liteZip"       | Set-Content -Path "dist\$liteZip.sha256"
+          "$bundledHash  $bundledZip" | Set-Content -Path "dist\$bundledZip.sha256"
 
           "LITE_NAME=$liteName"       | Out-File -FilePath $env:GITHUB_ENV -Append
           "BUNDLED_NAME=$bundledName" | Out-File -FilePath $env:GITHUB_ENV -Append
@@ -118,10 +138,18 @@ jobs:
       - name: Normalize version tag
         shell: bash
         run: |
+          set -euo pipefail
           RAW="${APP_VERSION_RAW}"
+          # Reject anything but a plain version/tag before it is written to
+          # GITHUB_ENV (a newline in it would inject extra variables) and
+          # used as the release tag name.
+          if [[ ! "$RAW" =~ ^v?[0-9][0-9A-Za-z._+-]*$ ]]; then
+            echo "::error::Unsupported version/tag: $RAW"
+            exit 1
+          fi
           if [[ "$RAW" != v* ]]; then RAW="v$RAW"; fi
-          echo "TAG_NAME=$RAW" >> "$GITHUB_ENV"
-          echo "VERSION=${RAW#v}" >> "$GITHUB_ENV"
+          printf 'TAG_NAME=%s\n' "$RAW" >> "$GITHUB_ENV"
+          printf 'VERSION=%s\n' "${RAW#v}" >> "$GITHUB_ENV"
 
       - name: Download all build artifacts
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
@@ -133,7 +161,13 @@ jobs:
       - name: Prepare release metadata
         id: prep
         run: |
-          awk '/^## \['"$VERSION"'\]/{flag=1; next} /^## \[/{flag=0} flag' CHANGELOG.md > release_notes.md
+          set -euo pipefail
+          # The version is passed with -v instead of being spliced into the
+          # awk program text: the old '/^## \['"$VERSION"'\]/' form let a
+          # crafted tag inject awk code between the literals.
+          awk -v ver="$VERSION" \
+            'index($0, "## [" ver "]") == 1 {flag=1; next} /^## \[/ {flag=0} flag' \
+            CHANGELOG.md > release_notes.md
 
       - name: Create GitHub Release and upload assets
         uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3

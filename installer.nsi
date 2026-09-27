@@ -15,12 +15,15 @@
 ; Build inputs:
 ;   dist\chrisnov-media-toolkit-lite.exe   (from: .\build-windows.ps1 -Type Lite)
 ;   bin\ffmpeg.exe, bin\ffprobe.exe        (only needed for the optional
-;                                           "Include FFmpeg" component)
+;                                           "Include FFmpeg" component; when
+;                                           they are absent the component is
+;                                           skipped at compile time so a
+;                                           clean checkout still builds)
 
 !define PRODUCT_NAME "Chrisnov Media Toolkit"
 !ifndef PRODUCT_VERSION
   !define PRODUCT_VERSION "0.2.0-beta.4"
-endif
+!endif
 !define PRODUCT_PUBLISHER "Chrisnov IT Solutions"
 !define PRODUCT_WEB_SITE "https://chrisnov.com"
 !define PRODUCT_UNINST_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\${PRODUCT_NAME}"
@@ -87,6 +90,12 @@ Section "Core Files (required)" SecCore
   WriteRegStr ${PRODUCT_UNINST_ROOT_KEY} "${PRODUCT_UNINST_KEY}" "InstallLocation" "$INSTDIR"
 SectionEnd
 
+; The FFmpeg component only exists when both binaries were actually staged
+; into bin\ (build-windows.ps1 -Type Bundled, or a manual copy). Without this
+; guard the `File` instructions below made makensis fail at compile time on
+; any checkout that had not downloaded FFmpeg yet.
+!if /FileExists "bin\ffmpeg.exe"
+!if /FileExists "bin\ffprobe.exe"
 Section /o "Include FFmpeg (~150 MB)" SecBundled
   SetOutPath "$INSTDIR\bin"
   File "bin\ffmpeg.exe"
@@ -97,11 +106,17 @@ Section /o "Include FFmpeg (~150 MB)" SecBundled
     File "bin\FFMPEG-LICENSE.txt"
   !endif
 SectionEnd
+!endif
+!endif
 
 ; Section descriptions
 !insertmacro MUI_FUNCTION_DESCRIPTION_BEGIN
   !insertmacro MUI_DESCRIPTION_TEXT ${SecCore} "Chrisnov Media Toolkit application. Required. Without FFmpeg (below or on your system PATH), downloads still work but merging/conversion features are unavailable."
+!if /FileExists "bin\ffmpeg.exe"
+!if /FileExists "bin\ffprobe.exe"
   !insertmacro MUI_DESCRIPTION_TEXT ${SecBundled} "Include FFmpeg binaries (~150 MB additional), installed into the app's bin folder so the app finds them automatically. Required for audio/video conversion and yt-dlp format merging. Skip this if FFmpeg is already installed on your system (recommended for advanced users)."
+!endif
+!endif
 !insertmacro MUI_FUNCTION_DESCRIPTION_END
 
 ; Desktop shortcut function

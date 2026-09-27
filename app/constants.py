@@ -21,3 +21,9 @@ AUDIO_BITRATES = ["96", "128", "160", "192", "256", "320"]  # kbps
 
 PLAYLIST_CONFIRM_THRESHOLD = 50
 MAX_HISTORY_ENTRIES = 1000
+
+# Muted gray for secondary text that must read on both Light and Dark
+# backgrounds: the About dialog's credit links and the palette fallbacks
+# in icon.py/theme.py when the theme is mid-update. One literal, several
+# callers — change it here.
+NEUTRAL_GRAY = "#8a94a0"

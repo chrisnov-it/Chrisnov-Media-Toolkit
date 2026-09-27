@@ -19,7 +19,7 @@ Write-Host "==> Checking venv..." -ForegroundColor Cyan
 if (-not (Test-Path "$venv\Scripts\python.exe")) {
     Write-Host "ERROR: .venv not found. Run setup first:" -ForegroundColor Red
     Write-Host "  py -m venv .venv"
-    Write-Host "  .venv\Scripts\pip install PySide6 yt-dlp"
+    Write-Host "  .venv\Scripts\pip install -r requirements.txt"
     exit 1
 }
 
@@ -106,7 +106,7 @@ if ($Type -eq "Bundled" -or $Type -eq "Both") {
                         -Pattern 'ffmpeg-master-latest-win64-gpl\.zip\s*$' | Select-Object -First 1
                     if ($entry) { $expectedHash = ($entry.Line -split '\s+')[0].ToUpper() }
                 } catch {
-                    Write-Host "WARNING: could not fetch checksums.sha256 - skipping verification." -ForegroundColor Yellow
+                    Write-Host "WARNING: could not fetch checksums.sha256 - verification cannot run (see the fail-closed check below)." -ForegroundColor Yellow
                 }
                 if ($expectedHash) {
                     $actualHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $zipFile).Hash.ToUpper()
@@ -115,7 +115,16 @@ if ($Type -eq "Bundled" -or $Type -eq "Both") {
                     }
                     Write-Host "Checksum OK ($actualHash)." -ForegroundColor Green
                 } else {
-                    Write-Host "WARNING: no checksum entry for the archive - verify it manually before releasing." -ForegroundColor Yellow
+                    # Fail closed: shipping an unverified ~150 MB binary is
+                    # exactly what this step exists to prevent (both the fetch
+                    # failure and a missing entry end up here). The env var is
+                    # a deliberate escape hatch for a broken checksum file —
+                    # never set it for a published release.
+                    if ($env:ALLOW_UNVERIFIED_FFMPEG -eq "1") {
+                        Write-Host "WARNING: checksum verification bypassed via ALLOW_UNVERIFIED_FFMPEG=1 - do NOT publish this build." -ForegroundColor Yellow
+                    } else {
+                        throw "Could not verify the FFmpeg archive (no SHA256 entry). Retry, or set ALLOW_UNVERIFIED_FFMPEG=1 to bypass - never for releases."
+                    }
                 }
                 
                 Write-Host "Extracting archive..." -ForegroundColor Yellow
@@ -171,6 +180,15 @@ $appVersion = try {
 # Environment variable overrides local read (CI use-case)
 if ($env:APP_VERSION) {
     $appVersion = $env:APP_VERSION
+}
+
+# version_info.txt is Python source that PyInstaller evaluates, and the
+# version is interpolated into it inside single-quoted string literals: a
+# value containing a quote, newline or space would corrupt the file (or inject
+# code into the build). Accept only plain version characters.
+if ($appVersion -notmatch '^[0-9A-Za-z._+\-]+$') {
+    Write-Host "ERROR: version '$appVersion' contains characters that cannot be written into version_info.txt." -ForegroundColor Red
+    exit 1
 }
 
 $versionArray = try {

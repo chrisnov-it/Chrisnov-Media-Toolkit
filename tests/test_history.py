@@ -156,3 +156,67 @@ def test_clear_persists_empty(tmp_path):
         (tmp_path / "download-history.json").read_text(encoding="utf-8"),
     )
     assert data["items"] == []
+
+
+def test_save_is_atomic_and_leaves_no_temp_file(tmp_path):
+    """The payload goes to a sibling .tmp and is moved into place, so a crash
+    mid-write can never truncate the file the next load() reads."""
+    h = make_history(tmp_path)
+    h.append(url="u", filepath="f", filename="n", filesize=1,
+             type_="audio", container="mp3", audio_only=True,
+             status="completed")
+    assert (tmp_path / "download-history.json").exists()
+    assert not (tmp_path / "download-history.json.tmp").exists()
+
+
+def test_save_keeps_previous_copy_as_backup(tmp_path):
+    h = make_history(tmp_path)
+    h.append(url="first", filepath="f", filename="n", filesize=1,
+             type_="audio", container="mp3", audio_only=True,
+             status="completed")
+    # Nothing to back up yet — the main file did not exist before this save.
+    assert not (tmp_path / "download-history.json.bak").exists()
+
+    h.append(url="second", filepath="f", filename="n", filesize=1,
+             type_="audio", container="mp3", audio_only=True,
+             status="completed")
+    bak = tmp_path / "download-history.json.bak"
+    assert bak.exists()
+    assert [e["url"] for e in json.loads(bak.read_text(encoding="utf-8"))["items"]] \
+        == ["first"]
+
+
+def test_load_falls_back_to_backup_when_main_is_corrupt(tmp_path):
+    """A truncated main file must not wipe the history (the old code reset
+    to [] and the next append overwrote everything)."""
+    p = tmp_path / "download-history.json"
+    p.write_text('{"version": 1, "items": [{"url": "lost"', encoding="utf-8")
+    (tmp_path / "download-history.json.bak").write_text(
+        json.dumps({"version": 1, "items": [{"url": "kept", "filename": "f"}]}),
+        encoding="utf-8",
+    )
+    h = DownloadHistory(p)
+    h.load()
+    assert [e["url"] for e in h.entries] == ["kept"]
+
+
+def test_load_caps_entries(tmp_path, monkeypatch):
+    """append() only caps what it adds; a hand-edited oversized file must be
+    capped at load time too."""
+    monkeypatch.setattr(history_mod, "MAX_HISTORY_ENTRIES", 3)
+    p = tmp_path / "download-history.json"
+    p.write_text(
+        json.dumps({"version": 1, "items": [{"url": f"u{i}"} for i in range(10)]}),
+        encoding="utf-8",
+    )
+    h = DownloadHistory(p)
+    h.load()
+    assert [e["url"] for e in h.entries] == ["u0", "u1", "u2"]
+
+
+def test_save_reports_failure_instead_of_swallowing_it(tmp_path):
+    """A failed write returns False (and logs) so callers can react."""
+    blocker = tmp_path / "not-a-directory"
+    blocker.write_text("x", encoding="utf-8")
+    h = DownloadHistory(blocker / "download-history.json")
+    assert h.save() is False

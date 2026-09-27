@@ -104,7 +104,7 @@ it yourself. First-time setup takes ~5 min; each subsequent build
 ~2 min on Intel hardware.
 
 ```bash
-brew install python@3.12 ffmpeg pyinstaller
+brew install python@3.12 ffmpeg
 
 git clone https://github.com/chrisnov-it/Chrisnov-Media-Toolkit.git
 cd Chrisnov-Media-Toolkit

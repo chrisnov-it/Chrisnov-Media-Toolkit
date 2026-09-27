@@ -1,6 +1,7 @@
 """Title-cleaning utilities."""
 
 import re
+import sys
 from pathlib import Path
 
 # Default tags to strip from titles
@@ -75,8 +76,15 @@ def clean_title(title: str, tags: list[str]) -> str:
         # 4. Bare tag (surrounded by whitespace / separators)
         bare_pat = r"(?:^|[\s\-|])(?:" + t + r")(?:[\s\-|]|$)"
         result = re.sub(bare_pat, " ", result, flags=re.IGNORECASE)
-        # 5. Plain fallback — any remaining occurrence of the raw tag text
-        result = re.sub(t, " ", result, flags=re.IGNORECASE)
+        # 5. Plain fallback — any remaining occurrence of the raw tag text,
+        #    but only as a whole word. Without the boundaries this rule eats
+        #    substrings: tag "Live" turned "Alive" into "A", "HD" turned
+        #    "UHD" into "U", tag "Topic" turned "Topical" into "ical".
+        #    (\b only where the tag actually starts/ends with a word char, so
+        #    custom tags like "R&B" still match.)
+        left = r"\b" if re.match(r"\w", tag) else ""
+        right = r"\b" if re.search(r"\w$", tag) else ""
+        result = re.sub(left + t + right, " ", result, flags=re.IGNORECASE)
 
     # Remove leftover dangling bracket characters (opened but never closed, or vice versa)
     # e.g. a lone "(" or "[" at end, or "]" / ")" at start, possibly with surrounding spaces
@@ -128,7 +136,14 @@ def discover_new_files(
     start_ts: float,
     extensions: set[str],
 ) -> list[Path]:
-    """Return files in outdir newer than start_ts matching the given extensions."""
+    """Return files in outdir newer than start_ts matching the given extensions.
+
+    A file that already existed before the batch is never returned, even when
+    something else bumps its mtime while we download: Windows reports creation
+    time as st_ctime and macOS/BSD as st_birthtime, and those are checked in
+    addition to the mtime. Linux has no creation-time stat, so it keeps the
+    mtime-only behaviour (best the platform can offer).
+    """
     out = Path(outdir)
     if not out.is_dir():
         return []
@@ -140,9 +155,15 @@ def discover_new_files(
         if p.suffix.lstrip(".").lower() not in extensions:
             continue
         try:
-            mtime = p.stat().st_mtime
+            st = p.stat()
         except OSError:
             continue
-        if mtime >= cutoff:
-            found.append(p)
+        if st.st_mtime < cutoff:
+            continue
+        created = getattr(st, "st_birthtime", None)
+        if created is None and sys.platform == "win32":
+            created = st.st_ctime  # creation time on Windows
+        if created is not None and created < cutoff:
+            continue
+        found.append(p)
     return found

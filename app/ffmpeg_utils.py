@@ -137,25 +137,74 @@ def probe_version(binary: str) -> str | None:
     match = re.search(r"version (\S+)", result.stdout)
     return match.group(1) if match else None
 
-def probe_duration(ffprobe: str, src: Path) -> float | None:
-    """Return media duration in seconds, or None if ffprobe cannot determine it."""
+def probe_duration(
+    ffprobe: str,
+    src: Path,
+    *,
+    timeout: float = 30,
+    cancelled: Callable[[], bool] | None = None,
+    set_process: Callable[[subprocess.Popen[str] | None], None] | None = None,
+) -> float | None:
+    """Return media duration in seconds, or None if ffprobe cannot determine it.
+
+    Runs via Popen with a poll loop instead of a blocking subprocess.run so the
+    caller can cancel: when *cancelled* reports True (or *timeout* elapses) the
+    ffprobe child is terminated — and killed if it ignores that — and None is
+    returned. Without this, cancelling while the probe ran left the worker
+    stuck inside subprocess.run for up to 30 s, which made the GUI's Cancel
+    fall back to QThread.terminate(). *set_process* receives the live Popen
+    (None when done) so cancel() can reach the child from another thread.
+    """
     cmd = [
         ffprobe, "-v", "error",
         "-show_entries", "format=duration",
         "-of", "default=noprint_wrappers=1:nokey=1",
         str(src),
     ]
-    result = subprocess.run(
-        cmd, capture_output=True, text=True, timeout=30, check=False,
+    process = subprocess.Popen(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
         **_no_window_kwargs(),
     )
-    if result.returncode != 0:
+    if set_process is not None:
+        set_process(process)
+    try:
+        deadline = time.monotonic() + timeout
+        while process.poll() is None:
+            if cancelled is not None and cancelled():
+                _stop_process(process)
+                return None
+            if time.monotonic() > deadline:
+                _stop_process(process)
+                return None
+            time.sleep(0.1)
+        # ffprobe prints a single short line; reading after exit cannot block.
+        assert process.stdout is not None
+        stdout = process.stdout.read()
+    finally:
+        if set_process is not None:
+            set_process(None)
+    if process.returncode != 0:
         return None
     try:
-        duration = float(result.stdout.strip())
+        duration = float(stdout.strip())
     except ValueError:
         return None
     return duration if duration > 0 else None
+
+
+def _stop_process(process: subprocess.Popen) -> None:
+    """Terminate a child we are abandoning, killing it if that is ignored."""
+    process.terminate()
+    try:
+        process.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        process.wait()
 
 
 def probe_loudness(
@@ -164,7 +213,7 @@ def probe_loudness(
     default_lufs: float,
     default_true_peak: float,
     default_lra: float,
-    timeout: int = 300,
+    timeout: float = 300,
     *,
     cancelled: Callable[[], bool] | None = None,
     set_process: Callable[[subprocess.Popen[str] | None], None] | None = None,
@@ -183,7 +232,7 @@ def probe_loudness(
     *timeout* seconds.
     """
     cmd = [
-        ffmpeg, "-hide_banner", "-nostats",
+        ffmpeg, "-hide_banner", "-nostats", "-nostdin",
         "-i", str(src),
         "-vn",
         "-af", (
@@ -210,12 +259,7 @@ def probe_loudness(
         try:
             while process.poll() is None:
                 if cancelled is not None and cancelled():
-                    process.terminate()
-                    try:
-                        process.wait(timeout=5)
-                    except subprocess.TimeoutExpired:
-                        process.kill()
-                        process.wait()
+                    _stop_process(process)
                     raise RuntimeError("Cancelled.")
                 if time.monotonic() > deadline:
                     process.kill()
@@ -316,32 +360,38 @@ def run_ffmpeg_with_progress(
         )
         if set_process is not None:
             set_process(process)
-        assert process.stdout is not None
-        last_emit = 0.0
-        for line in process.stdout:
-            if cancelled():
-                process.terminate()
-                break
-            key, _, value = line.strip().partition("=")
-            if key == "out_time_ms" and duration:
-                try:
-                    elapsed = int(value) / 1_000_000
-                except ValueError:
-                    continue
-                pct = int(min(1.0, elapsed / duration) * (progress_ceiling - progress_floor))
-                now = time.monotonic()
-                if now - last_emit >= 0.2:
-                    on_progress(progress_floor + pct)
-                    last_emit = now
         try:
-            code = process.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            process.kill()
-            code = process.wait()
-        stderr_file.seek(0)
-        stderr_tail = stderr_file.read()[-800:]
-        if set_process is not None:
-            set_process(None)
+            assert process.stdout is not None
+            last_emit = 0.0
+            for line in process.stdout:
+                if cancelled():
+                    process.terminate()
+                    break
+                key, _, value = line.strip().partition("=")
+                if key == "out_time_ms" and duration:
+                    try:
+                        elapsed = int(value) / 1_000_000
+                    except ValueError:
+                        continue
+                    pct = int(min(1.0, elapsed / duration) * (progress_ceiling - progress_floor))
+                    now = time.monotonic()
+                    if now - last_emit >= 0.2:
+                        on_progress(progress_floor + pct)
+                        last_emit = now
+            try:
+                code = process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                code = process.wait()
+            stderr_file.seek(0)
+            stderr_tail = stderr_file.read()[-800:]
+        finally:
+            # Must run on every exit path (cancel, ffmpeg failure, an
+            # exception while draining stdout): a stale self._process left
+            # pointing at a dead Popen makes cancel() operate on nothing and
+            # hides that the run is already over.
+            if set_process is not None:
+                set_process(None)
     if cancelled():
         raise RuntimeError("Cancelled.")
     if code != 0:

@@ -18,11 +18,17 @@ bash build-linux.sh
 ```powershell
 # In PowerShell from the project root:
 Set-ExecutionPolicy -Scope Process Bypass
-.\build-windows.ps1
-# Outputs: dist\chrisnov-media-toolkit-vX.Y.Z-windows-x64-lite.zip
-#          dist\chrisnov-media-toolkit-vX.Y.Z-windows-x64-bundled.zip
+.\build-windows.ps1 -Type Both
+# Outputs: dist\chrisnov-media-toolkit-lite.exe
+#          dist\chrisnov-media-toolkit-bundled.exe
 ```
-Each `.zip` contains the standalone `.exe`. For a custom Windows icon, place `icon.ico` in the project root before building; without it the `.exe` uses the default icon (the in‑app window still uses `icon.svg`).
+Each `.exe` is a standalone build. The versioned names
+(`chrisnov-media-toolkit-vX.Y.Z-windows-x64-…`) and the release `.zip`
+wrapping are done by `.github/workflows/build-windows.yml`, not by the
+local script. For a custom Windows icon, place `icon.ico` in the project
+root before building; without one the script renders it from `icon.svg`
+automatically, and without either the `.exe` uses the default icon (the
+in-app window still uses `icon.svg`).
 
 ### macOS
 Prebuilt `.zip`s are produced by `.github/workflows/build-macos.yml` and attached to GitHub Releases for both Apple Silicon (`-macos-arm64-lite.zip`) and Intel (`-macos-x86_64-lite.zip`). The CI pins a macOS deployment target of 12.0 so Intel builds run on older Macs (e.g. 2015 MacBook Air). See [`OLD-MAC-WORKAROUND.md`](OLD-MAC-WORKAROUND.md) for Intel‑Mac specifics and SHA256 verification.
@@ -52,7 +58,7 @@ Chrisnov-Media-Toolkit/
 │   ├── settings.py       # AppSettings — typed QSettings wrapper
 │   ├── theme.py          # Palette-aware stylesheets (Light/Dark Mode)
 │   ├── icon.py           # Bundled palette-aware SVG tab icons + queue status icons
-│   ├── utils.py          # open_in_explorer helper
+│   ├── utils.py          # open_in_explorer + bounded folder scan (scan_media_files)
 │   ├── window.py         # MainWindow — thin shell (tabs, drag-drop, About)
 │   └── worker_tracking.py # WorkerTracker — pins QThreads until deferred delete
 └── .venv/                # Python venv (pinned deps from requirements-dev.txt)

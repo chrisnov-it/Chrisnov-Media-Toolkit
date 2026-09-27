@@ -1,5 +1,6 @@
 """Tests for app.cleaner — title cleaning, tag parsing, rename, discovery."""
 
+import sys
 import time
 from pathlib import Path
 
@@ -100,6 +101,23 @@ class TestCleanTitle:
         assert not out.endswith(" -")
         assert not out.endswith("-")
 
+    @pytest.mark.parametrize("title,tag,expected", [
+        # The raw-tag fallback (rule 5) used to run with no word boundaries,
+        # so the tag "Live" ate the "Live" inside "Alive", "HD" the "HD" in
+        # "UHD", etc. It must only match as a whole word.
+        ("Alive Again",        "Live",  "Alive Again"),
+        ("UHD Movie Night",    "HD",    "UHD Movie Night"),
+        ("Topical News",       "Topic", "Topical News"),
+        ("Audiobook Sampler",  "Audio", "Audiobook Sampler"),
+    ])
+    def test_bare_fallback_is_word_bounded(self, title, tag, expected):
+        assert clean_title(title, [tag]) == expected
+
+    def test_bracketed_and_separator_forms_still_stripped(self):
+        """The word-bounded fallback must not break the real use cases."""
+        assert clean_title("Song (Live)", ["Live"]) == "Song"
+        assert clean_title("Song - Live", ["Live"]) == "Song"
+
 
 # -- rename_with_cleanup ---------------------------------------------------
 
@@ -140,9 +158,10 @@ class TestRenameWithCleanup:
                                   DEFAULT_CLEAN_TAGS)
         assert out is not None
         assert out.parent == tmp_path
-        assert out.name.startswith("Song (")
-        assert out.name != "Song.mp3"
-        assert "1" in out.name or "2" in out.name or "3" in out.name
+        # "Song.mp3" is already taken, so the counter must hand out exactly
+        # "Song (1).mp3" — the first free suffix, not just any number.
+        assert out.name == "Song (1).mp3"
+        assert out.read_text() == "old"
 
     def test_handles_path_string(self, tmp_path: Path):
         f = tmp_path / "Song (Official Music Video).mp3"
@@ -197,3 +216,27 @@ class TestDiscoverNewFiles:
         names = [p.name for p in found]
         assert "top.mp3" in names
         assert "nested.mp3" not in names
+
+    @pytest.mark.skipif(
+        sys.platform != "win32",
+        reason="st_ctime is creation time only on Windows",
+    )
+    def test_pre_existing_file_not_found_even_if_touched(self, tmp_path: Path):
+        """A file that existed before the batch must not be reported, even
+        when another process bumps its mtime while we download — renaming it
+        would clobber something the app never created."""
+        import os
+
+        pre = tmp_path / "pre.mp3"
+        pre.write_text("x")
+        born = pre.stat().st_ctime  # Windows: creation time
+
+        # Simulate a touch during the batch: mtime moves past the cutoff while
+        # the file itself was created before it.
+        os.utime(pre, (born + 10, born + 10))
+        assert pre.stat().st_mtime >= born + 5 - 1
+
+        # Control: cutoff before creation → discovered normally.
+        assert [p.name for p in discover_new_files(tmp_path, born - 5, {"mp3"})] == ["pre.mp3"]
+        # Cutoff after creation → excluded by the creation-time check.
+        assert discover_new_files(tmp_path, born + 5, {"mp3"}) == []

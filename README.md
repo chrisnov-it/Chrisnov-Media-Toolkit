@@ -129,7 +129,7 @@ python3 -m venv .venv
 Convert local audio files, or pull the audio out of local videos, to **mp3, m4a, opus, flac, or wav**. Options: bitrate, sample rate, loudness normalization (EBU R128), trim silence, and **Folder** to batch a whole album. The progress bar shows a live ETA while converting.
 
 ### Video Converter tab
-Convert local videos to **mp4, mkv, or webm**. Quality presets: **Keep quality / Balanced / Smaller file**. “Keep original audio when possible” keeps your existing audio track when the container supports it. The progress bar shows a live ETA while converting.
+Convert local videos to **mp4, mkv, or webm**. Quality presets: **Keep quality / Balanced / Smaller file**. **Copy audio** (on by default) keeps your existing audio track when the container supports it; uncheck it to re-encode the audio. The progress bar shows a live ETA while converting.
 
 ### Drag & drop
 Drop a URL, some text, or a `.txt` file of URLs (one per line) onto the window to add them to the queue. Lines starting with `#` are ignored.

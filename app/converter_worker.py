@@ -21,16 +21,16 @@ from .ffmpeg_utils import (
 # Constants (re-exported for external callers / window.py)
 # ---------------------------------------------------------------------------
 
-SUPPORTED_INPUT_EXTENSIONS = {
-    # Audio
+AUDIO_INPUT_EXTENSIONS = {
     "mp3", "m4a", "aac", "flac", "wav", "ogg", "opus", "wma", "ape", "aiff",
-    # Video (extract audio)
-    "mp4", "mkv", "webm", "avi", "mov", "wmv", "flv", "ts", "m4v",
 }
-OUTPUT_FORMATS = ["mp3", "m4a", "opus", "flac", "wav"]
 VIDEO_INPUT_EXTENSIONS = {
     "mp4", "mkv", "webm", "avi", "mov", "wmv", "flv", "ts", "m4v",
 }
+# The audio converter accepts both: video files get their audio extracted,
+# so its extension filter is the union of the two sets above.
+SUPPORTED_INPUT_EXTENSIONS = AUDIO_INPUT_EXTENSIONS | VIDEO_INPUT_EXTENSIONS
+OUTPUT_FORMATS = ["mp3", "m4a", "opus", "flac", "wav"]
 VIDEO_OUTPUT_FORMATS = ["mp4", "mkv", "webm"]
 VIDEO_QUALITY_PRESETS = [
     ("Keep quality", "keep"),
@@ -50,11 +50,39 @@ DEFAULT_LUFS = -14.0
 DEFAULT_TRUE_PEAK = -1.0
 DEFAULT_LRA = 11.0
 
+# Progress bands each worker reports inside. The converter tabs map their
+# ETA and progress bar onto the very same range (see _conv_kick_next and
+# _video_conv_kick_next), so both sides reference these names instead of
+# repeating the numbers and drifting apart.
+PROGRESS_BAND = (10, 90)     # one-pass audio conversion, every video encode
+EBU_SCAN_BAND = (5, 40)      # two-pass loudnorm: loudness scan (pass 1)
+EBU_ENCODE_BAND = (40, 90)   # two-pass loudnorm: encoding (pass 2)
+EBU_PROGRESS_BAND = (EBU_SCAN_BAND[0], EBU_ENCODE_BAND[1])  # full two-pass range
+
+
+def _remove_partial(out_path: Path) -> None:
+    """Delete a half-written output after an aborted or failed encode.
+
+    resolve_output_path() only ever hands out a path that did not exist yet,
+    so anything on disk there was written by the invocation that just died.
+    Leaving it behind put a truncated/corrupt file in the user's output
+    folder — and title cleanup would happily rename it afterwards.
+    """
+    try:
+        out_path.unlink()
+    except OSError:
+        pass  # already gone, or locked by a lingering ffmpeg — nothing to do
+
 
 class ConvertWorker(CancellableWorker):
-    """Convert a single file using ffmpeg. Emits progress (0-100), status, and result."""
+    """Convert a single file using ffmpeg.
 
-    progress = Signal(int)      # 0-100
+    Emits progress (a percentage mapped into PROGRESS_BAND /
+    EBU_PROGRESS_BAND — not 0-100), a human-readable status, and exactly
+    one of finished_ok (output path) or failed (error message).
+    """
+
+    progress = Signal(int)      # percent within the worker's progress band
     status   = Signal(str)      # human-readable status
     finished_ok = Signal(str)   # output path on success
     failed      = Signal(str)   # error message
@@ -70,7 +98,7 @@ class ConvertWorker(CancellableWorker):
         sample_rate: int | None = None, # None = keep original
         norm_mode: str = "none",        # "none" | "ebu" | "peak"
         lufs_target: float = DEFAULT_LUFS,
-        peak_target: float = -1.0,
+        peak_target: float = DEFAULT_TRUE_PEAK,
         trim_silence: bool = False,
         clean_tags: list[str] | None = None,
         idx_label: str = "",
@@ -112,15 +140,28 @@ class ConvertWorker(CancellableWorker):
         try:
             ffmpeg = find_ffmpeg()
             ffprobe = find_ffprobe()
-            self.duration = probe_duration(ffprobe, self.src)
+            self.duration = probe_duration(
+                ffprobe, self.src,
+                cancelled=lambda: self._cancelled,
+                set_process=self._set_process,
+            )
+            if self._cancelled:
+                # Cancelled while probing: stop here instead of resolving an
+                # output path and spinning up ffmpeg for a dead request.
+                self.status.emit("Cancelled.")
+                return
             out_path = resolve_output_path(
                 self.src, self.outdir, self.fmt, self.clean_tags,
             )
 
-            if self.norm_mode == "ebu":
-                self._run_with_ebu(ffmpeg, out_path)
-            else:
-                self._run_single_pass(ffmpeg, out_path)
+            try:
+                if self.norm_mode == "ebu":
+                    self._run_with_ebu(ffmpeg, out_path)
+                else:
+                    self._run_single_pass(ffmpeg, out_path)
+            except Exception:
+                _remove_partial(out_path)
+                raise
 
             # Apply clean title rename if requested
             if self.clean_tags:
@@ -150,12 +191,10 @@ class ConvertWorker(CancellableWorker):
         filters: list[str] = []
 
         if self.trim_silence:
-            # Trim leading silence only (start_periods=1).
-            # Avoid stop_periods=-1 which can cause ffmpeg to hang on short
-            # or near-silent files — use a separate areverse pass instead
-            # (handled as two filters: trim start, reverse, trim start, reverse).
-            # For simplicity and reliability we only trim the head here;
-            # trailing silence is handled by the areverse trick below.
+            # Trim leading silence (start_periods=1). Avoid stop_periods=-1:
+            # it can make ffmpeg hang on short or near-silent files. The very
+            # same filter is applied a second time between the areverse
+            # passes below, which is what trims trailing silence safely.
             filters.append(
                 "silenceremove=start_periods=1"
                 ":start_duration=0.1"
@@ -228,7 +267,7 @@ class ConvertWorker(CancellableWorker):
         af_filters: list[str],
         extra_input_args: list[str] | None = None,
     ) -> list[str]:
-        cmd = [ffmpeg, "-hide_banner", "-y"]
+        cmd = [ffmpeg, "-hide_banner", "-y", "-nostdin"]
         if extra_input_args:
             cmd += extra_input_args
         cmd += ["-i", str(self.src), "-vn"]  # -vn strips video stream
@@ -243,16 +282,17 @@ class ConvertWorker(CancellableWorker):
         """Single-pass conversion (no EBU R128)."""
         af = self._audio_filters()
         cmd = self._build_cmd(ffmpeg, out_path, af)
+        lo, hi = PROGRESS_BAND
         self.status.emit(f"{self.idx_label} Converting {self.src.name}...")
-        self.progress.emit(10)
-        self._run_ffmpeg(cmd, progress_floor=10, progress_ceiling=90)
-        self.progress.emit(90)
+        self.progress.emit(lo)
+        self._run_ffmpeg(cmd, progress_floor=lo, progress_ceiling=hi)
+        self.progress.emit(hi)
 
     def _run_with_ebu(self, ffmpeg: str, out_path: Path) -> None:
         """Two-pass EBU R128 loudnorm conversion."""
         # Pass 1 — measure
         self.status.emit(f"{self.idx_label} Scanning loudness (pass 1/2)...")
-        self.progress.emit(5)
+        self.progress.emit(EBU_SCAN_BAND[0])
         measured = probe_loudness(
             ffmpeg, self.src,
             default_lufs=DEFAULT_LUFS,
@@ -262,7 +302,7 @@ class ConvertWorker(CancellableWorker):
             cancelled=lambda: self._cancelled,
             set_process=self._set_process,
         )
-        self.progress.emit(40)
+        self.progress.emit(EBU_SCAN_BAND[1])
 
         # Build loudnorm filter with measured values for accurate 2nd pass
         lnorm = (
@@ -281,8 +321,9 @@ class ConvertWorker(CancellableWorker):
         self.status.emit(f"{self.idx_label} Applying loudnorm + converting (pass 2/2)...")
         af = self._audio_filters(loudnorm_apply=lnorm)
         cmd = self._build_cmd(ffmpeg, out_path, af)
-        self._run_ffmpeg(cmd, progress_floor=40, progress_ceiling=90)
-        self.progress.emit(90)
+        lo, hi = EBU_ENCODE_BAND
+        self._run_ffmpeg(cmd, progress_floor=lo, progress_ceiling=hi)
+        self.progress.emit(hi)
 
     def _run_ffmpeg(
         self, cmd: list[str], *, progress_floor: int = 0, progress_ceiling: int = 100,
@@ -347,23 +388,37 @@ class VideoConvertWorker(CancellableWorker):
         try:
             ffmpeg = find_ffmpeg()
             ffprobe = find_ffprobe()
-            self.duration = probe_duration(ffprobe, self.src)
+            self.duration = probe_duration(
+                ffprobe, self.src,
+                cancelled=lambda: self._cancelled,
+                set_process=self._set_process,
+            )
+            if self._cancelled:
+                self.status.emit("Cancelled.")
+                return
             out_path = resolve_output_path(
                 self.src, self.outdir, self.fmt, self.clean_tags,
             )
             cmd = self._build_cmd(ffmpeg, out_path)
             self.status.emit(f"{self.idx_label} Converting {self.src.name}...")
-            self.progress.emit(10)
+            self.progress.emit(PROGRESS_BAND[0])
             try:
-                self._run_ffmpeg(cmd)
-            except RuntimeError:
-                if self._cancelled or not self.copy_audio:
-                    raise
-                self.status.emit(
-                    f"{self.idx_label} Audio stream incompatible, retrying with AAC/Opus..."
-                )
-                self.copy_audio = False
-                self._run_ffmpeg(self._build_cmd(ffmpeg, out_path))
+                try:
+                    self._run_ffmpeg(cmd)
+                except RuntimeError:
+                    if self._cancelled or not self.copy_audio:
+                        raise
+                    self.status.emit(
+                        f"{self.idx_label} Audio stream incompatible, retrying with AAC/Opus..."
+                    )
+                    self.copy_audio = False
+                    self._run_ffmpeg(self._build_cmd(ffmpeg, out_path))
+            except Exception:
+                # Both the failed attempt and the final failure land here; the
+                # retry above reuses the same path with -y, so only a give-up
+                # leaves the partial file removed.
+                _remove_partial(out_path)
+                raise
 
             if self.clean_tags:
                 from .cleaner import rename_with_cleanup
@@ -403,7 +458,7 @@ class VideoConvertWorker(CancellableWorker):
         return ["-c:a", "aac", "-b:a", "160k"]
 
     def _build_cmd(self, ffmpeg: str, out_path: Path) -> list[str]:
-        cmd = [ffmpeg, "-hide_banner", "-y", "-i", str(self.src)]
+        cmd = [ffmpeg, "-hide_banner", "-y", "-nostdin", "-i", str(self.src)]
         cmd += self._video_args()
         cmd += self._audio_args()
         if self.fmt == "mp4":
@@ -415,15 +470,16 @@ class VideoConvertWorker(CancellableWorker):
         """Execute ffmpeg with progress reporting and cancellation support.
 
         Delegates to ffmpeg_utils.run_ffmpeg_with_progress. The video converter
-        maps ffmpeg progress onto the 10-90 range (leaving 0-10 and 90-100 as
-        status/complete headroom in the caller).
+        maps ffmpeg progress onto PROGRESS_BAND (leaving the head and tail of
+        0-100 as status/complete headroom in the caller).
         """
+        lo, hi = PROGRESS_BAND
         run_ffmpeg_with_progress(
             cmd,
             duration=self.duration,
             cancelled=lambda: self._cancelled,
             on_progress=lambda pct: self.progress.emit(pct),
-            progress_floor=10,
-            progress_ceiling=90,
+            progress_floor=lo,
+            progress_ceiling=hi,
             set_process=self._set_process,
         )

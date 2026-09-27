@@ -30,6 +30,17 @@ from .history import DownloadHistory
 from .utils import open_in_explorer
 
 
+def _fmt_size(n: int) -> str:
+    """Human-readable byte size: whole KB, one decimal MB/GB, exact B."""
+    if n > 1e9:
+        return f"{n / 1e9:.1f} GB"
+    if n > 1e6:
+        return f"{n / 1e6:.1f} MB"
+    if n > 1e3:
+        return f"{n / 1e3:.0f} KB"
+    return f"{n} B"
+
+
 class HistoryTab(QWidget):
     """Tab 4 — download history list."""
 
@@ -105,8 +116,19 @@ class HistoryTab(QWidget):
     #  Rendering and actions                                               #
     # ------------------------------------------------------------------ #
 
-    def refresh(self, filter_text: str = "", filter_type: str = "All") -> None:
-        """Re-populate the history list from the model (old _history_render)."""
+    def refresh(self, filter_text: str | None = None,
+                filter_type: str | None = None) -> None:
+        """Re-populate the history list from the model (old _history_render).
+
+        Called with no arguments by the history_changed signal (a download
+        finished) and after Clear All: the current search text and type
+        filter are then reused, so a new entry landing no longer silently
+        resets what the user had typed or filtered.
+        """
+        if filter_text is None:
+            filter_text = self._history_search.text()
+        if filter_type is None:
+            filter_type = self._history_filter.currentText()
         self._history_list.clear()
         query = filter_text.lower().strip()
         n_total = len(self._history.entries)
@@ -144,14 +166,7 @@ class HistoryTab(QWidget):
                 rel = f"{delta // 86400}d ago"
 
             # Human-readable size
-            if filesize > 1e9:
-                size_str = f"{filesize / 1e9:.1f} GB"
-            elif filesize > 1e6:
-                size_str = f"{filesize / 1e6:.1f} MB"
-            elif filesize > 1e3:
-                size_str = f"{filesize / 1e3:.0f} KB"
-            else:
-                size_str = f"{filesize} B"
+            size_str = _fmt_size(filesize)
 
             # Status color
             completed = status == "completed"
@@ -167,14 +182,20 @@ class HistoryTab(QWidget):
             self._history_list.addItem(item)
 
         # Update summary
-        size_total = ""
-        if total_bytes > 1e9:
-            size_total = f"{total_bytes / 1e9:.1f} GB"
-        elif total_bytes > 1e6:
-            size_total = f"{total_bytes / 1e6:.1f} MB"
         self._history_summary.setText(
-            f"({n_total} items, {size_total} total)" if size_total else f"({n_total} items)"
+            f"({n_total} items, {_fmt_size(total_bytes)} total)"
         )
+        # Empty-state wording depends on *why* nothing is shown: an empty
+        # history says "no downloads yet", a filter that hides every row
+        # says "no matches" — never both claims at once.
+        if n_total == 0:
+            self._history_empty.setText(
+                "No downloads yet.\nPress Start to begin downloading."
+            )
+        else:
+            self._history_empty.setText(
+                "No matching entries.\nAdjust the search or filter."
+            )
         self._history_empty.setVisible(n_shown == 0)
 
     def _on_history_search_changed(self) -> None:

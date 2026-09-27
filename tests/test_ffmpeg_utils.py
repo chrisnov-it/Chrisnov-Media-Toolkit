@@ -5,6 +5,7 @@ These cover the logic extracted out of converter_worker.py during the
 workers refactor.
 """
 
+import io
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -106,40 +107,124 @@ class TestFindBinary:
         assert find_ffprobe() == "/opt/bin/ffprobe"
 
 
+class TestInstallHint:
+    """_install_hint() is the actionable half of FFmpeg's "not found"
+    message — it must name the right package command per platform."""
+
+    @pytest.mark.parametrize(
+        ("platform", "expect"),
+        [
+            ("win32", "winget install Gyan.FFmpeg"),
+            ("darwin", "brew install ffmpeg"),
+            ("linux", "sudo apt install ffmpeg"),
+        ],
+    )
+    def test_platform_specific_command(self, monkeypatch, platform, expect):
+        from app.ffmpeg_utils import _install_hint
+        monkeypatch.setattr("sys.platform", platform)
+        assert _install_hint("ffmpeg") == expect
+
+
 # -- probe_duration ----------------------------------------------------------
+
+
+def _fake_probe_popen(monkeypatch, stdout: str = "120.5\n",
+                      returncode: int = 0) -> dict:
+    """Patch subprocess.Popen for probe_duration() with a short-lived child.
+
+    probe_duration polls a real Popen (so the caller can cancel it) instead of
+    blocking in subprocess.run, which is what these tests stand in for.
+    Returns the dict of recorded call/kwargs/instance data.
+    """
+    calls: dict = {}
+
+    class _Popen:
+        def __init__(self, cmd, **kwargs):
+            calls["cmd"] = cmd
+            calls["kw"] = kwargs
+            self.stdout = io.StringIO(stdout)
+            self.returncode = returncode
+            self.terminated = False
+            calls["instance"] = self
+
+        def poll(self):
+            return self.returncode
+
+        def wait(self, timeout=None):
+            return self.returncode
+
+        def terminate(self):
+            self.terminated = True
+            self.returncode = -15
+
+        def kill(self):
+            self.returncode = -9
+
+    monkeypatch.setattr("subprocess.Popen", _Popen, raising=False)
+    return calls
+
 
 class TestProbeDuration:
     def test_returns_duration_on_success(self, monkeypatch):
-        calls = {}
-
-        def fake_run(cmd, **kw):
-            calls["cmd"] = cmd
-            return SimpleNamespace(returncode=0, stdout="120.5\n")
-
-        monkeypatch.setattr("subprocess.run", fake_run)
+        calls = _fake_probe_popen(monkeypatch, "120.5\n")
         assert probe_duration("/bin/ffprobe", Path("/tmp/x.mp3")) == 120.5
         assert calls["cmd"][0] == "/bin/ffprobe"
 
     def test_returns_none_on_nonzero_rc(self, monkeypatch):
-        monkeypatch.setattr(
-            "subprocess.run",
-            lambda *a, **k: SimpleNamespace(returncode=1, stdout=""),
-        )
+        _fake_probe_popen(monkeypatch, "", returncode=1)
         assert probe_duration("/bin/ffprobe", Path("/tmp/x.mp3")) is None
 
     def test_returns_none_on_invalid_float(self, monkeypatch):
-        monkeypatch.setattr(
-            "subprocess.run",
-            lambda *a, **k: SimpleNamespace(returncode=0, stdout="abc\n"),
-        )
+        _fake_probe_popen(monkeypatch, "abc\n")
         assert probe_duration("/bin/ffprobe", Path("/tmp/x.mp3")) is None
 
     def test_returns_none_for_zero_duration(self, monkeypatch):
-        monkeypatch.setattr(
-            "subprocess.run",
-            lambda *a, **k: SimpleNamespace(returncode=0, stdout="0\n"),
-        )
+        _fake_probe_popen(monkeypatch, "0\n")
         assert probe_duration("/bin/ffprobe", Path("/tmp/x.mp3")) is None
+
+    def test_cancel_terminates_child_and_returns_none(self, monkeypatch):
+        """A cancelled probe must kill ffprobe — that is what makes Cancel
+        non-blocking: the worker can no longer be stuck inside subprocess."""
+        instances = []
+
+        class _HangPopen:
+            def __init__(self, cmd, **kwargs):
+                self.stdout = io.StringIO("")
+                self.returncode = None
+                self.terminated = False
+                instances.append(self)
+
+            def poll(self):
+                return self.returncode
+
+            def wait(self, timeout=None):
+                return self.returncode if self.returncode is not None else -15
+
+            def terminate(self):
+                self.terminated = True
+                self.returncode = -15
+
+            def kill(self):
+                self.returncode = -9
+
+        monkeypatch.setattr("subprocess.Popen", _HangPopen, raising=False)
+
+        result = probe_duration("/bin/ffprobe", Path("/tmp/x.mp3"),
+                                cancelled=lambda: True)
+
+        assert result is None
+        assert instances[0].terminated is True
+
+    def test_set_process_sees_child_while_running(self, monkeypatch):
+        calls = _fake_probe_popen(monkeypatch, "42.0\n")
+        seen = []
+        result = probe_duration("/bin/ffprobe", Path("/tmp/x.mp3"),
+                                set_process=seen.append)
+        assert result == 42.0
+        # Handed over at start and cleared again once the probe is done, so
+        # cancel() from the GUI thread can reach the live child.
+        assert seen[0] is calls["instance"]
+        assert seen[-1] is None
 
 
 # -- probe_version ------------------------------------------------------------
@@ -290,6 +375,9 @@ class TestProbeLoudness:
         cmd = _FakeScanPopen.records[0][0]
         # -vn keeps the scan from decoding the video stream
         assert "-vn" in cmd
+        # -nostdin: the scan must never read our stdin (console input meant
+        # for the app, or a stray keystroke) and block on it.
+        assert "-nostdin" in cmd
         assert "print_format=json" in cmd[cmd.index("-af") + 1]
 
     def test_cancel_terminates_scan_and_raises(self, monkeypatch):
@@ -472,6 +560,24 @@ class TestRunFfmpegWithProgress:
                 on_progress=progress.append,
             )
 
+    def test_set_process_cleared_even_when_ffmpeg_fails(self, monkeypatch):
+        """set_process(None) must run on the failure path too — it used to be
+        called only on success, leaving a dead Popen registered on the worker."""
+        self._patch_popen(monkeypatch, [], exit_code=1)
+        processes = []
+
+        with pytest.raises(RuntimeError, match="ffmpeg error"):
+            run_ffmpeg_with_progress(
+                self._cmd(),
+                duration=100.0,
+                cancelled=lambda: False,
+                on_progress=lambda pct: None,
+                set_process=processes.append,
+            )
+
+        assert processes and processes[0] is not None
+        assert processes[-1] is None, "set_process(None) must run before raising"
+
 
 class TestNoWindowKwargs:
     """Child ffmpeg/ffprobe processes must never open a console window.
@@ -510,13 +616,7 @@ class TestNoWindowKwargs:
 
     def test_probe_duration_passes_the_flag(self, monkeypatch):
         monkeypatch.setattr("sys.platform", "win32")
-        calls = {}
-
-        def fake_run(cmd, **kw):
-            calls["kw"] = kw
-            return SimpleNamespace(returncode=0, stdout="12.5\n")
-
-        monkeypatch.setattr("subprocess.run", fake_run)
+        calls = _fake_probe_popen(monkeypatch, "12.5\n")
         assert probe_duration("/usr/bin/ffprobe", Path("/tmp/x.mp3")) == 12.5
         assert calls["kw"]["creationflags"] == ffmpeg_utils._CREATE_NO_WINDOW
 

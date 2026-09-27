@@ -12,14 +12,16 @@ Extracted from the MainWindow monolith (window.py) with behavior kept
 
 from __future__ import annotations
 
+import contextlib
 import json
+import logging
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import urlparse
 
-from PySide6.QtCore import QSize, Qt, Signal
-from PySide6.QtGui import QBrush, QColor, QKeySequence, QShortcut
+from PySide6.QtCore import QSize, Qt, QThread, Signal
+from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -56,7 +58,7 @@ from .constants import (
     VIDEO_CONTAINERS,
 )
 from .history import DownloadHistory
-from .icon import STATUS_COLORS, queue_status_icon
+from .icon import mark_status
 from .settings import AppSettings
 from .theme import _base_font_size as _font_size
 from .utils import open_in_explorer
@@ -70,6 +72,8 @@ from .worker import (
 )
 from .worker_tracking import WorkerTracker
 from .yt_dlp_opts import is_playlist_url
+
+log = logging.getLogger(__name__)
 
 
 @dataclass
@@ -363,9 +367,6 @@ class DownloadTab(QWidget):
                 if token.startswith(("http://", "https://")):
                     self._add_url(token)
                     n_added += 1
-        if n_added == 0 and text.strip().startswith(("http://", "https://")):
-            self._add_url(text.strip())
-            n_added = 1
         self.status_label.setText(f"Added {n_added} URL(s) to queue.")
 
     def _paste_clipboard(self) -> None:
@@ -601,6 +602,9 @@ class DownloadTab(QWidget):
         if self._batch is None:
             self.status_label.setText("Ready.")
             self.download_btn.setEnabled(True)
+        # Darker than STATUS_COLORS["failed"] (#e53e3e) on purpose: this is
+        # body text in the info box, and #a62929 keeps AA contrast on the
+        # light background while #e53e3e is the status *mark* red.
         self.info_box.setText(
             f"<span style='color:#a62929;'>Error: {err}</span>"
         )
@@ -632,7 +636,8 @@ class DownloadTab(QWidget):
         if self.clean_chk.isChecked() and not clean_tags:
             QMessageBox.warning(
                 self, "No cleanup tags",
-                "Clean title is on but no tags are listed. Returning.",
+                "Clean title is on but no cleanup tags are listed.\n"
+                "Add at least one tag, or turn Clean title off.",
             )
             return
 
@@ -713,6 +718,10 @@ class DownloadTab(QWidget):
     def _on_inspect_done(self, big: list) -> None:
         """Called when PlaylistInspectWorker finishes without error."""
         self._inspect_worker = None
+        if self._batch is None:
+            # Cancelled while this event was still queued: the batch state
+            # and the queue are gone, so don't prompt or restart anything.
+            return
         if big:
             lines = [f"• {title} — {n} entries (~{est})" for _, n, est, title in big]
             msg = "Large playlists detected:\n\n" + "\n".join(lines) + "\n\nContinue?"
@@ -724,33 +733,33 @@ class DownloadTab(QWidget):
             )
             if ans != QMessageBox.StandardButton.Yes:
                 self.status_label.setText("Download cancelled.")
-                self._reset_after_batch()
+                # Nothing was downloaded — keep the queued URLs so declining a
+                # huge playlist doesn't silently throw the whole queue away.
+                self._reset_after_batch(clear_queue=False)
                 return
         self._kick_next()
 
     def _on_inspect_error(self, url: str, msg: str) -> None:
         """Called when PlaylistInspectWorker hits a network/parse error."""
         self._inspect_worker = None
+        if self._batch is None:
+            # Cancelled while this event was still queued — a late warning
+            # dialog + _reset_after_batch() would wipe the user's new queue.
+            return
         QMessageBox.warning(self, "Playlist error", f"{url}\n\n{msg}")
         self.status_label.setText("Download cancelled.")
-        self._reset_after_batch()
+        # Same as declining: the batch never started, so the queue is intact
+        # and the user should still be able to edit or retry it.
+        self._reset_after_batch(clear_queue=False)
 
     def _mark_queue_item(self, row: int, status: str,
                          tooltip: str = "") -> None:
         """Give a queue row its batch status: amber arrow = running, green
         check = done, red cross = failed (+ optional tooltip). Rows stay
-        aligned with batch.urls because queue edits are blocked mid-batch."""
-        item = self.queue_list.item(row)
-        if item is None:
-            return
-        icon = queue_status_icon(status)
-        if not icon.isNull():
-            item.setIcon(icon)
-        color = STATUS_COLORS.get(status)
-        if color:
-            item.setForeground(QBrush(QColor(color)))
-        if tooltip:
-            item.setToolTip(tooltip)
+        aligned with batch.urls because queue edits are blocked mid-batch;
+        the painting itself is shared with the converter queues via
+        icon.mark_status()."""
+        mark_status(self.queue_list.item(row), status, tooltip)
 
     def _kick_next(self) -> None:
         batch = self._batch
@@ -798,41 +807,91 @@ class DownloadTab(QWidget):
             return
         url = batch.urls[batch.idx] if batch.idx < len(batch.urls) else ""
 
-        if isinstance(path, str) and path.startswith(("playlist_files:", "playlist:")):
-            # Playlist batches: collect the final paths (post-rename when
-            # cleaning ran, original otherwise) and build a readable history
-            # label instead of the raw worker payload.
-            if path.startswith("playlist_files:"):
-                playlist_files, playlist_label, renamed = self._collect_playlist_files(path, batch)
+        # Record the result in its own try: stat()/rename/history can all fail
+        # (TOCTOU on a file that just vanished, full disk, ...) and that must
+        # never escape the Qt slot — a raised exception used to skip
+        # batch.idx += 1 / _kick_next() and freeze the whole queue.
+        completed = False   # a history entry was written for a real on-disk file
+        row_status = "done" # icon shown on the queue row
+        missing_note: str | None = None
+        try:
+            if isinstance(path, str) and path.startswith(("playlist_files:", "playlist:")):
+                # Playlist batches: collect the final paths (post-rename when
+                # cleaning ran, original otherwise) and build a readable history
+                # label instead of the raw worker payload.
+                if path.startswith("playlist_files:"):
+                    playlist_files, playlist_label, renamed = self._collect_playlist_files(path, batch)
+                else:
+                    playlist_files, playlist_label, renamed = self._discover_playlist_files(path, batch)
+                total_bytes = sum(self._size_of(f) for f in playlist_files)
+                self._history.append(
+                    url=url, filepath=batch.outdir, filename=playlist_label,
+                    filesize=total_bytes,
+                    type_="playlist", container=batch.container,
+                    audio_only=batch.audio_only, status="completed",
+                )
+                completed = True
             else:
-                playlist_files, playlist_label, renamed = self._discover_playlist_files(path, batch)
-            total_bytes = sum(f.stat().st_size for f in playlist_files if f.exists())
-            self._history.append(
-                url=url, filepath=batch.outdir, filename=playlist_label,
-                filesize=total_bytes,
-                type_="playlist", container=batch.container,
-                audio_only=batch.audio_only, status="completed",
-            )
-        else:
-            final_path, renamed = self._finish_single_file(path, batch)
-            self._history.append(
-                url=url, filepath=str(final_path), filename=final_path.name,
-                filesize=final_path.stat().st_size if final_path.exists() else 0,
-                type_="audio" if batch.audio_only else "video",
-                container=batch.container, audio_only=batch.audio_only,
-                status="completed",
-            )
+                final_path, renamed = self._finish_single_file(path, batch)
+                if final_path.exists():
+                    self._history.append(
+                        url=url, filepath=str(final_path), filename=final_path.name,
+                        filesize=self._size_of(final_path),
+                        type_="audio" if batch.audio_only else "video",
+                        container=batch.container, audio_only=batch.audio_only,
+                        status="completed",
+                    )
+                    completed = True
+                else:
+                    # yt-dlp can report success for something we cannot find
+                    # (removed/moved externally, or a path we failed to
+                    # resolve). Recording status="completed" would put a dead
+                    # entry in the history: zero size, a folder that cannot be
+                    # opened, and a "requeue" that hides what really happened.
+                    self._history.append(
+                        url=url, filepath=str(final_path), filename=final_path.name,
+                        filesize=0,
+                        type_="audio" if batch.audio_only else "video",
+                        container=batch.container, audio_only=batch.audio_only,
+                        status="failed",
+                        error=f"File not found after download: {final_path}",
+                    )
+                    row_status = "failed"
+                    missing_note = (
+                        f"[{batch.idx + 1}/{batch.total}] Reported OK, but the "
+                        f"file is missing: {final_path.name}"
+                    )
 
-        if batch.clean_tags and renamed:
+            if batch.clean_tags and renamed:
+                self.status_label.setText(
+                    f"Cleaned {len(renamed)} file(s), e.g. {renamed[0]!r}"
+                )
+            if missing_note is not None:
+                self.status_label.setText(missing_note)
+            self._mark_queue_item(batch.idx, row_status)
+        except Exception as exc:  # noqa: BLE001 — slot boundary: report, don't stall
+            log.warning("Could not record finished download %s: %s", url, exc)
             self.status_label.setText(
-                f"Cleaned {len(renamed)} file(s), e.g. {renamed[0]!r}"
+                f"[{batch.idx + 1}/{batch.total}] Finished, but recording the "
+                f"result failed: {exc}"
             )
-        self._mark_queue_item(batch.idx, "done")
+            # Best-effort row mark: even this must not escape the slot.
+            with contextlib.suppress(Exception):
+                self._mark_queue_item(batch.idx, "failed", tooltip=str(exc))
+        finally:
+            if completed:
+                batch.done += 1
+            batch.idx += 1
+            self.history_changed.emit()
+            self._kick_next()
 
-        batch.idx += 1
-        batch.done += 1
-        self.history_changed.emit()
-        self._kick_next()
+    @staticmethod
+    def _size_of(path: Path) -> int:
+        """File size in bytes, 0 when it vanished between exists() and stat()."""
+        try:
+            return path.stat().st_size
+        except OSError:
+            return 0
 
     def _collect_playlist_files(self, payload: str, batch: BatchState
                                 ) -> tuple[list[Path], str, list[str]]:
@@ -886,62 +945,97 @@ class DownloadTab(QWidget):
         if batch is None:
             return
         url = batch.urls[batch.idx] if batch.idx < len(batch.urls) else ""
-        self._history.append(
-            url=url, filepath="",
-            filename=url.split("/")[-1][:40] if url else "?",
-            filesize=0, type_="audio" if batch.audio_only else "video",
-            container=batch.container, audio_only=batch.audio_only,
-            status="failed", error=msg,
-        )
-        hint = ytdlp_update_hint(msg)
-        status = f"[{batch.idx + 1}/{batch.total}] Error: {msg}"
-        if hint:
-            status += f" — {hint}"
-        self._mark_queue_item(
-            batch.idx, "failed", tooltip=msg + (f"\n\n{hint}" if hint else "")
-        )
-        self.status_label.setText(status)
-        batch.idx += 1
-        self.history_changed.emit()
-        self._kick_next()
+        # Same fencing as _on_item_ok: bookkeeping must never be able to
+        # escape the slot and strand the batch mid-queue.
+        try:
+            self._history.append(
+                url=url, filepath="",
+                filename=url.split("/")[-1][:40] if url else "?",
+                filesize=0, type_="audio" if batch.audio_only else "video",
+                container=batch.container, audio_only=batch.audio_only,
+                status="failed", error=msg,
+            )
+            hint = ytdlp_update_hint(msg)
+            status = f"[{batch.idx + 1}/{batch.total}] Error: {msg}"
+            if hint:
+                status += f" — {hint}"
+            self._mark_queue_item(
+                batch.idx, "failed", tooltip=msg + (f"\n\n{hint}" if hint else "")
+            )
+            self.status_label.setText(status)
+        except Exception as exc:  # noqa: BLE001 — slot boundary: report, don't stall
+            log.warning("Could not record failed download %s: %s", url, exc)
+            self.status_label.setText(f"[{batch.idx + 1}/{batch.total}] Error: {msg}")
+        finally:
+            batch.idx += 1
+            self.history_changed.emit()
+            self._kick_next()
 
     def _cancel_download(self) -> None:
-        # If still inspecting playlists, cancel that first
-        if self._inspect_worker and self._inspect_worker.isRunning():
-            self._inspect_worker.done.disconnect()
-            self._inspect_worker.error.disconnect()
-            self._inspect_worker.progress.disconnect()
-            self._inspect_worker.cancel()
-            self._inspect_worker.wait(3000)
-            self._inspect_worker = None
-            self.status_label.setText("Cancelled.")
-            self._reset_after_batch()
-            return
+        """Stop the current batch without blocking the GUI thread.
 
-        if self.worker is not None and self.worker.isRunning():
-            # Disconnect signals first so any in-flight finished_ok/failed
-            # callbacks don't call _kick_next() on the already-reset state.
-            try:
-                self.worker.progress.disconnect()
-                self.worker.status.disconnect()
-                self.worker.finished_ok.disconnect()
-                self.worker.failed.disconnect()
-            except RuntimeError:
-                pass
-            # Ask yt-dlp to stop cleanly via the cancel flag; give it up to
-            # 5 s to honour the request before falling back to terminate().
-            self.worker.cancel()
-            if not self.worker.wait(5000):
-                self.worker.terminate()
-                self.worker.wait(2000)
+        Cancellation is cooperative: the flag makes yt-dlp abort at its next
+        progress hook (and the converter tabs' workers kill their own
+        ffmpeg/ffprobe children). Waiting for the thread here froze the UI
+        for up to 7 s, and QThread.terminate() on a thread that is inside
+        Python or subprocess code can deadlock the whole process — so the
+        worker is left to wind down on its own, kept alive by WorkerTracker
+        and ignored thanks to the self._batch is None guards in the handlers.
+        """
+        was_running = False
+
+        # Disconnect first so an already-queued done/error/finished event
+        # cannot drive _kick_next() or a modal dialog after the reset.
+        inspect = self._inspect_worker
+        if inspect is not None:
+            was_running = True
+            self._disconnect_signals(inspect, "done", "error", "progress")
+            inspect.cancel()
+            self._inspect_worker = None
+
+        worker = self.worker
+        if worker is not None:
+            was_running = True
+            self._disconnect_signals(worker, "progress", "status",
+                                     "finished_ok", "failed")
+            worker.cancel()
+
+        if was_running:
             cleaned = self._cleanup_recent_downloads()
             if cleaned:
                 self.status_label.setText(
-                    f"Cancelled. Cleaned {len(cleaned)} completed file(s), e.g. {cleaned[0]!r}"
+                    f"Cancelled. Cleaned {len(cleaned)} completed file(s), "
+                    f"e.g. {cleaned[0]!r}"
                 )
             else:
                 self.status_label.setText("Cancelled.")
         self._reset_after_batch()
+
+    @staticmethod
+    def _disconnect_signals(worker, *names: str) -> None:
+        """Drop every connection to the named signals (best-effort).
+
+        PySide raises RuntimeError when a signal has no connections left —
+        expected here, since handlers may already have run.
+        """
+        for name in names:
+            with contextlib.suppress(RuntimeError, TypeError):
+                getattr(worker, name).disconnect()
+
+    def shutdown(self) -> None:
+        """Cancel every worker when the window closes (idempotent)."""
+        info = self._info_worker
+        if info is not None:
+            self._disconnect_signals(info, "result", "error")
+            info.cancel()
+            self._info_worker = None
+            self.info_btn.setEnabled(True)
+            self.info_btn.setText("Info")
+        self._cancel_download()
+
+    def running_workers(self) -> list[QThread]:
+        """Live workers, so MainWindow can wait for them at shutdown."""
+        return self._tracker.running()
 
     def _cleanup_recent_downloads(self) -> list[str]:
         """Title-clean files that already landed before the cancel took."""
@@ -956,9 +1050,16 @@ class DownloadTab(QWidget):
                 renamed.append(new.name)
         return renamed
 
-    def _reset_after_batch(self) -> None:
-        self.current_batch.clear()
-        self.queue_list.clear()
+    def _reset_after_batch(self, *, clear_queue: bool = True) -> None:
+        """Return the tab to idle after a batch ends.
+
+        clear_queue=False keeps the queued URLs: used when the batch never
+        actually started (playlist declined, inspect failed), where wiping
+        the queue threw away entries the user had not acted on yet.
+        """
+        if clear_queue:
+            self.current_batch.clear()
+            self.queue_list.clear()
         # Drop the last download worker reference; the tracker keeps the
         # object alive until its thread has fully exited.
         self.worker = None
