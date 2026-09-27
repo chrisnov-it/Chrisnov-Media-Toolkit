@@ -7,10 +7,11 @@ shared here through a tags_provider callable.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from pathlib import Path
 
-from PySide6.QtCore import QSize, Qt, QThread
+from PySide6.QtCore import QSize, Qt, QThread, Signal
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
@@ -38,22 +39,31 @@ from .converter_worker import (
     VIDEO_QUALITY_PRESETS,
     VideoConvertWorker,
 )
+from .history import DownloadHistory
 from .icon import mark_status
 from .progress import EtaEstimator
 from .settings import AppSettings
-from .utils import open_in_explorer, scan_media_files
+from .utils import open_in_explorer, scan_media_files, set_controls_busy
 from .worker_tracking import WorkerTracker
+
+log = logging.getLogger(__name__)
 
 
 class VideoConvertTab(QWidget):
     """Tab 3 — batch video conversion queue."""
 
+    #: Emitted after a conversion outcome lands in the shared history, so
+    #: MainWindow can refresh the History tab (same pattern as DownloadTab).
+    history_changed = Signal()
+
     def __init__(self, settings: AppSettings,
                  tags_provider: Callable[[], str],
+                 history: DownloadHistory,
                  parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._settings = settings
         self._tags_provider = tags_provider
+        self._history = history
         self._tracker = WorkerTracker()
         self._video_conv_files: list[Path] = []
         self._video_conv_worker: VideoConvertWorker | None = None
@@ -199,6 +209,11 @@ class VideoConvertTab(QWidget):
         self.video_conv_progress.setRange(0, 100)
         root.addWidget(self.video_conv_progress)
         self.video_conv_status_label = QLabel("Ready.")
+        # Long errors wrap instead of clipping; selectable so they can be read.
+        self.video_conv_status_label.setWordWrap(True)
+        self.video_conv_status_label.setTextInteractionFlags(
+            Qt.TextInteractionFlag.TextSelectableByMouse
+        )
         root.addWidget(self.video_conv_status_label)
 
         # Controls _video_conv_kick_next() reads per item — frozen for the
@@ -237,7 +252,10 @@ class VideoConvertTab(QWidget):
             )
             return
         self._video_conv_files.append(path)
-        self.video_conv_file_list.addItem(QListWidgetItem(path.name))
+        item = QListWidgetItem(path.name)
+        # Full path on hover — the label is only the file name.
+        item.setToolTip(str(path))
+        self.video_conv_file_list.addItem(item)
         self._refresh_video_conv_empty()
 
     def _video_conv_add_folder(self, folder: Path) -> int:
@@ -328,11 +346,13 @@ class VideoConvertTab(QWidget):
             if self.video_conv_clean_chk.isChecked() else None
         )
 
-        self.video_conv_start_btn.setEnabled(False)
+        set_controls_busy(
+            (self.video_conv_start_btn, self.video_conv_add_files_btn,
+             self.video_conv_add_folder_btn, self.video_conv_remove_btn,
+             self.video_conv_clear_btn),
+            True,
+        )
         self.video_conv_cancel_btn.setEnabled(True)
-        for btn in (self.video_conv_add_files_btn, self.video_conv_add_folder_btn,
-                    self.video_conv_remove_btn, self.video_conv_clear_btn):
-            btn.setEnabled(False)
         self._video_conv_kick_next()
 
     def _video_conv_freeze_settings(self, frozen: bool) -> None:
@@ -340,10 +360,11 @@ class VideoConvertTab(QWidget):
 
         Disabled for the duration of a batch: leaving format, quality, audio
         copy, cleanup or the output folder editable mid-run let two items in
-        the same batch be converted with different settings.
+        the same batch be converted with different settings. Enabled state
+        and the "why is this off?" tooltip move together
+        (set_controls_busy).
         """
-        for wdg in self._video_conv_settings_widgets:
-            wdg.setEnabled(not frozen)
+        set_controls_busy(self._video_conv_settings_widgets, frozen)
 
     def _video_conv_kick_next(self) -> None:
         if not self._video_conv_active:
@@ -398,14 +419,57 @@ class VideoConvertTab(QWidget):
             self._eta_format = fmt
             self.video_conv_progress.setFormat(fmt)
 
+    def _record_conversion(self, src: Path, out_path: str,
+                           error: str) -> None:
+        """Append one conversion's outcome to the shared history model.
+
+        Conversions never reached the History tab before — only downloads
+        called ``history.append`` — so a failed conversion left no trace
+        beyond a transient status line. Like the Downloader's record-keeping
+        this method is self-fenced (a history write must never stall the
+        queue), and ``history_changed`` fires on every path so the History
+        tab is refreshed whether or not the write succeeded.
+        """
+        ok = not error
+        try:
+            if ok:
+                filepath = out_path
+                filename = Path(out_path).name
+                try:
+                    filesize = Path(out_path).stat().st_size
+                except OSError:
+                    filesize = 0
+            else:
+                filepath = ""
+                filename = src.name
+                filesize = 0
+            self._history.append(
+                # url = source file: it feeds the History search haystack and,
+                # being a local path (not http), never triggers a bogus requeue.
+                url=str(src), filepath=filepath, filename=filename,
+                filesize=filesize, type_="video",
+                container=self.video_conv_fmt_combo.currentText(),
+                audio_only=False,
+                status="completed" if ok else "failed",
+                error=None if ok else error,
+            )
+        except Exception as exc:  # noqa: BLE001 — slot boundary: report, don't stall
+            log.warning("Could not record conversion of %s: %s", src, exc)
+        finally:
+            self.history_changed.emit()
+
     def _on_video_conv_ok(self, out_path: str) -> None:
         if not self._video_conv_active:
             return
+        src = (self._video_conv_queue[self._video_conv_idx]
+               if self._video_conv_idx < len(self._video_conv_queue)
+               else Path(out_path))
         name = Path(out_path).name
         self.video_conv_status_label.setText(
             f"[{self._video_conv_idx + 1}/{self._video_conv_total}] Done → {name}"
         )
         self._mark_video_conv_item(self._video_conv_idx, "done")
+        self._record_conversion(src, out_path, "")
         self._video_conv_idx += 1
         self._video_conv_done += 1
         self._video_conv_kick_next()
@@ -413,10 +477,16 @@ class VideoConvertTab(QWidget):
     def _on_video_conv_fail(self, msg: str) -> None:
         if not self._video_conv_active:
             return
+        src = (self._video_conv_queue[self._video_conv_idx]
+               if self._video_conv_idx < len(self._video_conv_queue)
+               else Path("?"))
+        # Selectable, word-wrapped status label + a History entry carrying the
+        # error: the row tooltip alone vanished when the queue reset.
         self.video_conv_status_label.setText(
             f"[{self._video_conv_idx + 1}/{self._video_conv_total}] Error: {msg}"
         )
         self._mark_video_conv_item(self._video_conv_idx, "failed", tooltip=msg)
+        self._record_conversion(src, "", msg)
         self._video_conv_idx += 1
         self._video_conv_kick_next()
 
@@ -451,11 +521,13 @@ class VideoConvertTab(QWidget):
         self._video_conv_freeze_settings(False)
         self._eta_format = "%p%"
         self.video_conv_progress.setFormat(self._eta_format)
-        self.video_conv_start_btn.setEnabled(True)
+        set_controls_busy(
+            (self.video_conv_start_btn, self.video_conv_add_files_btn,
+             self.video_conv_add_folder_btn, self.video_conv_remove_btn,
+             self.video_conv_clear_btn),
+            False,
+        )
         self.video_conv_cancel_btn.setEnabled(False)
-        for btn in (self.video_conv_add_files_btn, self.video_conv_add_folder_btn,
-                    self.video_conv_remove_btn, self.video_conv_clear_btn):
-            btn.setEnabled(True)
         self._video_conv_worker = None
         self._video_conv_active = False
 

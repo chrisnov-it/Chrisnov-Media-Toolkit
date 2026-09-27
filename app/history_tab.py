@@ -64,7 +64,7 @@ class HistoryTab(QWidget):
 
         # Header
         header = QHBoxLayout()
-        title = QLabel("Download History")
+        title = QLabel("History")
         title.setStyleSheet("font-weight:600; font-size:10pt;")
         header.addWidget(title)
         self._history_summary = QLabel("")
@@ -179,6 +179,13 @@ class HistoryTab(QWidget):
             )
             item = QListWidgetItem(display)
             item.setData(Qt.ItemDataRole.UserRole, entry)
+            # Failed entries carry their reason: show it inline (the list
+            # word-wraps) and in the tooltip, since the queue row that
+            # originally held the error resets with the batch.
+            error = (entry.get("error") or "").strip()
+            if error and not completed:
+                item.setText(f"{display}  —  {error}")
+                item.setToolTip(error)
             self._history_list.addItem(item)
 
         # Update summary
@@ -228,16 +235,21 @@ class HistoryTab(QWidget):
 
         filepath = entry.get("filepath", "")
         url = entry.get("url", "")
-        status = entry.get("status", "")
 
-        if filepath and Path(filepath).exists() and status == "completed":
-            # Open the containing folder — for playlist entries, whose filepath
-            # is the output directory itself, open that directory directly.
+        if filepath and Path(filepath).exists():
+            # Open the containing folder — existence-based, not status-based:
+            # a failed entry whose file is still on disk (renamed output, a
+            # conversion's source, a vanished-then-restored download) opens
+            # where the file actually is instead of silently requeueing.
+            # For playlist entries, whose filepath is the output directory
+            # itself, open that directory directly.
             target = Path(filepath)
             open_in_explorer(str(target if target.is_dir() else target.parent))
             return
 
-        if url:
+        if url.startswith(("http://", "https://")):
             # Re-download (for failed items or when file missing) — MainWindow
-            # switches to the Downloader tab and queues the URL there.
+            # switches to the Downloader tab and queues the URL there. Only
+            # real URLs: conversion entries store a local source path in url
+            # (it feeds the search haystack) and must not be queued as a URL.
             self.requeue_requested.emit(url, entry.get("filename", ""))

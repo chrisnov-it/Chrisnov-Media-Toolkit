@@ -113,8 +113,12 @@ class MainWindow(QWidget):
         self._build_ui()
 
         # Cross-tab wiring. The Downloader tab must be constructed first —
-        # the converter tabs receive its clean_tags_text callable.
+        # the converter tabs receive its clean_tags_text callable. Both
+        # converter tabs append to the shared history, so their
+        # history_changed also refreshes the History tab.
         self.download_tab.history_changed.connect(self.history_tab.refresh)
+        self.audio_tab.history_changed.connect(self.history_tab.refresh)
+        self.video_tab.history_changed.connect(self.history_tab.refresh)
         self.history_tab.requeue_requested.connect(self._requeue_download)
 
         self.history_tab.refresh()
@@ -341,8 +345,12 @@ class MainWindow(QWidget):
         self._tabs = QTabWidget()
         self._tabs.setIconSize(QSize(16, 16))
         self.download_tab = DownloadTab(self._settings, self.history)
-        self.audio_tab = AudioConverterTab(self._settings, self.download_tab.clean_tags_text)
-        self.video_tab = VideoConvertTab(self._settings, self.download_tab.clean_tags_text)
+        self.audio_tab = AudioConverterTab(
+            self._settings, self.download_tab.clean_tags_text, self.history
+        )
+        self.video_tab = VideoConvertTab(
+            self._settings, self.download_tab.clean_tags_text, self.history
+        )
         self.history_tab = HistoryTab(self.history)
         # Icons are set separately (in palette color) — text glyphs here
         # previously went tofu on systems missing the font's symbols.

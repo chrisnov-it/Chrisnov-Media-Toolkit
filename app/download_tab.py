@@ -61,7 +61,7 @@ from .history import DownloadHistory
 from .icon import mark_status
 from .settings import AppSettings
 from .theme import _base_font_size as _font_size
-from .utils import open_in_explorer
+from .utils import clip_text, open_in_explorer, set_controls_busy
 from .worker import (
     DownloadWorker,
     FileSizeWorker,
@@ -318,6 +318,9 @@ class DownloadTab(QWidget):
         # Info box (hidden by default, shown after Info button click)
         self.info_box = QLabel("")
         self.info_box.setWordWrap(True)
+        self.info_box.setTextInteractionFlags(
+            Qt.TextInteractionFlag.TextSelectableByMouse
+        )
         self.info_box.setStyleSheet(
             "background: palette(light, mid); border: 1px solid palette(light, midlight); "
             "border-radius: 4px; padding: 4px 8px; font-size: "
@@ -343,6 +346,12 @@ class DownloadTab(QWidget):
         self.dl_progress.setRange(0, 100)
         root.addWidget(self.dl_progress)
         self.status_label = QLabel("Ready.")
+        # Long errors/URLs wrap instead of clipping, and the text can be
+        # selected so an error can actually be read and copied.
+        self.status_label.setWordWrap(True)
+        self.status_label.setTextInteractionFlags(
+            Qt.TextInteractionFlag.TextSelectableByMouse
+        )
         root.addWidget(self.status_label)
 
         # Ctrl+V/Cmd+V anywhere on this tab queues every URL in the
@@ -394,23 +403,27 @@ class DownloadTab(QWidget):
             if "list=" in url:
                 identifier = url.split("list=")[-1].split("&")[0]
                 # YouTube playlist IDs are typically 11-34 chars, Vimeo/others vary
-                display = f"\U0001f4cb {identifier[:20]}"
+                display = f"\U0001f4cb {clip_text(identifier, 20)}"
             else:
-                display = f"\U0001f4cb {url[:30]}"
+                display = f"\U0001f4cb {clip_text(url, 30)}"
         elif "v=" in url:
             vid = url.split("v=")[-1].split("&")[0]
-            display = f"[{vid[:11]}]"
+            display = f"[{clip_text(vid, 11)}]"
         elif host in ("vimeo.com", "player.vimeo.com"):
             # Vimeo URL: https://vimeo.com/123456789
             vid = url.rstrip("/").split("/")[-1]
-            display = f"[{vid[:11]}]"
+            display = f"[{clip_text(vid, 11)}]"
         elif host in ("instagram.com", "www.instagram.com", "dailymotion.com", "www.dailymotion.com"):
             # Instagram/Dailymotion: extract last path segment
             vid = url.rstrip("/").split("/")[-1]
-            display = f"[{vid[:15]}]"
+            display = f"[{clip_text(vid, 15)}]"
         else:
-            display = url[:40]
-        self.queue_list.addItem(QListWidgetItem(display))
+            display = clip_text(url, 40)
+        # Full URL in the tooltip: the label is a clipped preview, the row
+        # hover shows exactly what will be downloaded.
+        item = QListWidgetItem(display)
+        item.setToolTip(url)
+        self.queue_list.addItem(item)
         if self._is_playlist_url(url):
             self.status_label.setText(
                 "Playlist detected. Will fetch all entries on Start (size confirmation if >50)."
@@ -670,13 +683,14 @@ class DownloadTab(QWidget):
 
         # Disable UI immediately so the user can't double-submit or touch
         # the queue mid-batch (edits can't reach the running snapshot and
-        # would be wiped by the batch reset)
-        self.download_btn.setEnabled(False)
+        # would be wiped by the batch reset). The controls also get a tooltip
+        # explaining the freeze (tooltips still fire on disabled widgets).
+        set_controls_busy(
+            (self.download_btn, self.add_queue_btn, self.url_input,
+             self.remove_btn, self.clear_btn),
+            True,
+        )
         self.cancel_btn.setEnabled(True)
-        self.add_queue_btn.setEnabled(False)
-        self.url_input.setEnabled(False)
-        self.remove_btn.setEnabled(False)
-        self.clear_btn.setEnabled(False)
 
         playlist_urls = [u for u in batch.urls if self._is_playlist_url(u)]
         if playlist_urls:
@@ -1064,9 +1078,9 @@ class DownloadTab(QWidget):
         # object alive until its thread has fully exited.
         self.worker = None
         self._batch = None
-        self.download_btn.setEnabled(True)
+        set_controls_busy(
+            (self.download_btn, self.add_queue_btn, self.url_input,
+             self.remove_btn, self.clear_btn),
+            False,
+        )
         self.cancel_btn.setEnabled(False)
-        self.add_queue_btn.setEnabled(True)
-        self.url_input.setEnabled(True)
-        self.remove_btn.setEnabled(True)
-        self.clear_btn.setEnabled(True)

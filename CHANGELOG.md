@@ -123,6 +123,38 @@ All notable changes to this project are documented here.
   normalization or destination mid-run can no longer split one queue across
   inconsistent outputs.
 
+- **Disabled buttons had an invisible label (1.00:1 contrast)**
+  `QPushButton:disabled` set `color: {mid}; background: {mid}` — the *same*
+  palette color for text and surface, so every frozen control's caption (Start,
+  Convert, Clear…) vanished the moment it was disabled. Disabled labels now use
+  the button surface with text blended 45% toward it (4.6:1 in light, 4.9:1 in
+  dark — WCAG AA) plus explicit `#primaryButton:disabled` and
+  `#dangerButton:disabled` rules: Qt ranks ID selectors above `:disabled`, so
+  without them the blue primary kept looking enabled. Controls frozen by a
+  batch additionally swap their tooltip for "Unavailable while a batch is
+  running." (tooltips still fire on disabled widgets) and restore the original
+  text when the batch ends.
+
+- **Conversion failures left no trace and could not be read or copied**
+  Neither converter tab ever called `history.append`, so a failed run existed
+  only as a one-line status message that the batch summary overwrote — unquoted,
+  unselectable, and gone after the queue reset. Both tabs now take the shared
+  `DownloadHistory` (new constructor argument), record `completed`/`failed`
+  entries (source path in `url`: searchable, but never requeued as a URL — the
+  History action is scheme-guarded), fence the write so it can never stall the
+  queue, and emit `history_changed`. History rows append the error to the row
+  itself (word-wrapped) with the full message in the tooltip, and all three
+  status labels plus the Info box are word-wrapped and mouse-selectable so a
+  long error can actually be read and copied.
+
+- **Queue rows hid what they were about to download**
+  Labels were raw slices (`identifier[:20]`, `url[:40]`) that cut identifiers
+  mid-word with no indication anything was missing, and rows carried no tooltip
+  at all. Labels now end with `…` (shared `clip_text()`) and every row keeps the
+  full URL as its tooltip; converter rows show the full source path the same
+  way, and `mark_status()` appends a failure message instead of overwriting the
+  tooltip that was already there.
+
 ### Changed
 
 - **History polish** - the empty state distinguishes an empty history
@@ -143,8 +175,9 @@ All notable changes to this project are documented here.
   release `.sha256` files now carry `hash  filename` like the Linux/macOS
   ones, so `sha256sum -c` accepts them.
 
-- **Tests** - the suite grew from 171 to 206 (`tests/test_utils.py` and
-  `tests/test_main_excepthook.py` are new), with regression coverage for every
+- **Tests** - the suite grew from 171 to 220 (`tests/test_theme.py`,
+  `tests/test_utils.py` and `tests/test_main_excepthook.py` are new), with
+  regression coverage for every
   fix above, exact-value assertions where checks were vacuous, and skip guards
   that match how `find_ffmpeg()`/`find_ffprobe()` actually behave.
 

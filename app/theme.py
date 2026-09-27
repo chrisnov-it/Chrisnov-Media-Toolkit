@@ -100,6 +100,23 @@ def _palette_color(palette: QPalette, role: QPalette.ColorRole) -> str:
         return NEUTRAL_GRAY
 
 
+def _blend(fg: str, bg: str, t: float) -> str:
+    """Linear blend of two ``#rrggbb`` colors: t=0 → *fg*, t=1 → *bg*.
+
+    Used to derive a disabled-text color that is guaranteed to differ from
+    both the normal text and the button background in *any* palette (light,
+    dark, or constructed), unlike the palette's Disabled group — Qt palettes
+    often leave that group mirroring Active, which would make a disabled
+    primary button look enabled.
+    """
+    out = "#"
+    for i in (1, 3, 5):
+        a = int(fg[i:i + 2], 16)
+        b = int(bg[i:i + 2], 16)
+        out += f"{round(a + (b - a) * t):02x}"
+    return out
+
+
 def widget_stylesheet(palette: QPalette | None = None) -> str:
     """Return MainWindow's widget stylesheet, palette-aware.
 
@@ -128,6 +145,14 @@ def widget_stylesheet(palette: QPalette | None = None) -> str:
     mid = _palette_color(palette, QPalette.ColorRole.Mid)
     midlight = _palette_color(palette, QPalette.ColorRole.Midlight)
     dark_role = _palette_color(palette, QPalette.ColorRole.Dark)
+
+    # Disabled buttons: mid-on-mid rendered an invisible label (1.00:1).
+    # Use the normal button surface with text blended 45% toward it —
+    # measured ≥4.5:1 (WCAG AA) in both light and dark palettes while still
+    # reading as "muted". An explicit #primaryButton:disabled rule is also
+    # required: Qt gives ID selectors higher specificity than :disabled, so
+    # the blue primary rule otherwise wins and the button looks enabled.
+    disabled_text = _blend(button_text, button, 0.45)
 
     fs = _base_font_size()
     ff = _font_family()
@@ -254,8 +279,9 @@ QPushButton:pressed {{
     background: {dark_role};
 }}
 QPushButton:disabled {{
-    color: {mid};
-    background: {mid};
+    color: {disabled_text};
+    background: {button};
+    border-color: {midlight};
 }}
 QPushButton#primaryButton {{
     color: {primary_text};
@@ -266,6 +292,12 @@ QPushButton#primaryButton {{
 QPushButton#primaryButton:hover {{
     background: {midlight};
 }}
+QPushButton#primaryButton:disabled {{
+    color: {disabled_text};
+    background: {button};
+    border-color: {midlight};
+    font-weight: 600;
+}}
 QPushButton#dangerButton {{
     color: {window_text};
     border-color: {midlight};
@@ -273,6 +305,11 @@ QPushButton#dangerButton {{
 }}
 QPushButton#dangerButton:hover {{
     background: {mid};
+}}
+QPushButton#dangerButton:disabled {{
+    color: {disabled_text};
+    background: transparent;
+    border-color: {midlight};
 }}
 QCheckBox, QRadioButton {{
     font-size: {fs};

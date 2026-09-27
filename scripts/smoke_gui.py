@@ -216,6 +216,43 @@ def main() -> None:
     dl._clear_queue()
     check(dl.queue_list.count() == 0, "clear should empty the queue")
 
+    # --- Clipped rows keep the full target on hover (P1) ---------------------
+    # The old code sliced identifiers mid-word with no ellipsis and threw the
+    # full URL away — a row that hid what it was about to download.
+    from PySide6.QtCore import Qt
+
+    long_plain = "https://example.com/" + "very-long-path-segment/" * 6
+    ok = add_url(dl, long_plain)
+    check(ok is True, "long plain URL should be queued")
+    row = dl.queue_list.item(0)
+    check("…" in row.text(),
+          f"a clipped label must show an ellipsis, got {row.text()!r}")
+    check(row.toolTip() == long_plain,
+          "a clipped row must keep the full URL as its tooltip")
+
+    long_pl = ("https://www.youtube.com/watch?v=abc123def456&list="
+               + "PL" + "x" * 40)
+    ok = add_url(dl, long_pl)
+    check(ok is True, "long playlist URL should be queued")
+    row = dl.queue_list.item(1)
+    check("…" in row.text(),
+          f"a long playlist id must be ellipsised, got {row.text()!r}")
+    check(row.toolTip() == long_pl,
+          "the playlist row must keep the full URL as its tooltip")
+    dl._clear_queue()
+
+    # Status labels: long errors must wrap and be selectable/copyable (P1).
+    sel = Qt.TextInteractionFlag.TextSelectableByMouse
+    for label, name in (
+        (dl.status_label, "dl.status_label"),
+        (dl.info_box, "dl.info_box"),
+        (conv.conv_status_label, "conv.conv_status_label"),
+        (vid.video_conv_status_label, "vid.video_conv_status_label"),
+    ):
+        check(label.wordWrap(), f"{name} should word-wrap long messages")
+        check(bool(label.textInteractionFlags() & sel),
+              f"{name} should let the user select its text")
+
     # --- History model + rendering ----------------------------------------
     history_append(
         w, url="https://example.com/a", filepath="/tmp/a.mp3",
@@ -311,6 +348,10 @@ def main() -> None:
     conv.conv_dir_input.setText(_TMP_HOME)
     orig_kick = conv._conv_kick_next
     conv._conv_kick_next = lambda: None
+    from app.utils import BATCH_BUSY_HINT, set_controls_busy
+
+    orig_conv_tip = conv.conv_start_btn.toolTip()
+    orig_fmt_tip = conv.conv_fmt_combo.toolTip()
     try:
         conv._conv_start()
         check(conv._conv_active, "audio batch should be active after start")
@@ -321,17 +362,41 @@ def main() -> None:
                   f"{wdg_name} must be frozen while the batch runs")
         check(conv._conv_clean_tags is not None,
               "cleanup tags should be snapshotted at start")
+        # Frozen controls must explain *why* they are off (P1): tooltips
+        # still fire on disabled widgets, so this is the one place to answer
+        # "why can't I click this?".
+        check(conv.conv_start_btn.toolTip() == BATCH_BUSY_HINT,
+              f"frozen Convert should carry the busy tooltip, got "
+              f"{conv.conv_start_btn.toolTip()!r}")
+        check(conv.conv_fmt_combo.toolTip() == BATCH_BUSY_HINT,
+              "frozen settings should carry the busy tooltip too")
     finally:
         conv._conv_kick_next = orig_kick
         conv._conv_reset()
     check(conv.conv_fmt_combo.isEnabled(), "audio settings must thaw after the batch")
     check(conv.conv_dir_input.isEnabled(), "audio output folder must thaw too")
     check(conv._conv_clean_tags is None, "tag snapshot must be dropped at reset")
+    check(conv.conv_start_btn.toolTip() == orig_conv_tip,
+          "the busy tooltip must be restored when the batch ends")
+    check(conv.conv_fmt_combo.toolTip() == orig_fmt_tip,
+          "the settings' original tooltips must come back as well")
+
+    # The same helper, exercised directly on the Downloader's Start button.
+    orig_dl_tip = dl.download_btn.toolTip()
+    set_controls_busy((dl.download_btn,), True)
+    check(not dl.download_btn.isEnabled()
+          and dl.download_btn.toolTip() == BATCH_BUSY_HINT,
+          "busy Start should be disabled and self-explaining")
+    set_controls_busy((dl.download_btn,), False)
+    check(dl.download_btn.isEnabled()
+          and dl.download_btn.toolTip() == orig_dl_tip,
+          "unfreezing Start must restore its tooltip and enabled state")
 
     vid._video_conv_add_file(Path("/cmt-smoke/freeze.mp4"))
     vid.video_conv_dir_input.setText(_TMP_HOME)
     orig_vkick = vid._video_conv_kick_next
     vid._video_conv_kick_next = lambda: None
+    orig_vstart_tip = vid.video_conv_start_btn.toolTip()
     try:
         vid._video_conv_start()
         check(vid._video_conv_active, "video batch should be active after start")
@@ -342,12 +407,16 @@ def main() -> None:
                   f"{wdg_name} must be frozen while the batch runs")
         check(vid._video_conv_clean_tags is not None,
               "video cleanup tags should be snapshotted at start")
+        check(vid.video_conv_start_btn.toolTip() == BATCH_BUSY_HINT,
+              "frozen video Convert should carry the busy tooltip")
     finally:
         vid._video_conv_kick_next = orig_vkick
         vid._video_conv_reset()
     check(vid.video_conv_fmt_combo.isEnabled(),
           "video settings must thaw after the batch")
     check(vid._video_conv_clean_tags is None, "video tag snapshot must be dropped")
+    check(vid.video_conv_start_btn.toolTip() == orig_vstart_tip,
+          "the video busy tooltip must be restored when the batch ends")
 
     # --- Worker tracking ----------------------------------------------------
     class _Quick(QThread):
@@ -422,6 +491,121 @@ def main() -> None:
         for (kind, title, _) in _StubMessageBox.calls
     ), "history clear should confirm first")
     check(hist._history_list.count() == 0, "history should be empty after clear")
+
+    # --- Conversion outcomes must land in the shared history (P1) ------------
+    # Conversions never called history.append before: a failed run left no
+    # trace beyond a transient status line that vanished with the batch.
+    # The handlers are driven by hand with manual queue state — never
+    # _conv_start(), which would spawn a real ffmpeg worker.
+    out_file = Path(_TMP_HOME) / "converted.mp3"
+    out_file.write_bytes(b"x" * 64)
+    conv._conv_queue = [Path(_TMP_HOME) / "source.wav"]
+    conv._conv_files = [conv._conv_queue[0]]
+    conv._conv_idx = 0
+    conv._conv_total = 1
+    conv._conv_active = True
+    conv._on_conv_ok(str(out_file))
+    entry = w.history.entries[0]
+    check(entry.get("status") == "completed",
+          f"a finished conversion must be recorded as completed, "
+          f"got {entry.get('status')!r}")
+    check(entry.get("filepath") == str(out_file),
+          "the completed entry should point at the output file")
+    check(entry.get("type") == "audio",
+          f"the conversion entry should be typed audio, got {entry.get('type')!r}")
+
+    conv._conv_queue = [Path(_TMP_HOME) / "broken.wav"]
+    conv._conv_files = [conv._conv_queue[0]]
+    conv._conv_idx = 0
+    conv._conv_total = 1
+    conv._conv_active = True
+    conv._on_conv_fail("ffmpeg exploded: exit code 1")
+    entry = w.history.entries[0]
+    check(entry.get("status") == "failed",
+          f"a failed conversion must be recorded as failed, "
+          f"got {entry.get('status')!r}")
+    check("ffmpeg exploded" in (entry.get("error") or ""),
+          "the failed entry must keep its error message")
+    check(not entry.get("filepath"),
+          "a failed conversion must not claim an output file")
+    check(str(entry.get("url", "")).endswith("broken.wav"),
+          "url should hold the source path (searchable, never requeued)")
+
+    vout = Path(_TMP_HOME) / "converted.mp4"
+    vout.write_bytes(b"x" * 32)
+    vid._video_conv_queue = [Path(_TMP_HOME) / "clip.mkv"]
+    vid._video_conv_files = [vid._video_conv_queue[0]]
+    vid._video_conv_idx = 0
+    vid._video_conv_total = 1
+    vid._video_conv_active = True
+    vid._on_video_conv_ok(str(vout))
+    entry = w.history.entries[0]
+    check(entry.get("type") == "video" and entry.get("status") == "completed",
+          f"video conversion should record as completed/video, got "
+          f"{entry.get('type')!r}/{entry.get('status')!r}")
+
+    history_render(hist, w)
+    check(hist._history_list.count() == 3,
+          f"three conversion entries should render, got "
+          f"{hist._history_list.count()}")
+    fail_row = next(
+        (hist._history_list.item(i)
+         for i in range(hist._history_list.count())
+         if "ffmpeg exploded" in hist._history_list.item(i).text()),
+        None,
+    )
+    check(fail_row is not None,
+          "the failed conversion row should be rendered somewhere")
+    check("ffmpeg exploded" in fail_row.toolTip(),
+          "the failed history row must carry the error in its tooltip too")
+
+    # Double-click on a conversion entry must not requeue its local source
+    # path as a URL — the guard is scheme-based, not merely "url is set".
+    tab_before = w._tabs.currentIndex()
+    dl_rows = dl.queue_list.count()
+    hist._on_history_item_action(fail_row)
+    check(w._tabs.currentIndex() == tab_before,
+          "double-click on a conversion entry must not jump to the Downloader")
+    check(dl.queue_list.count() == dl_rows,
+          "a local source path must never be queued as a URL")
+
+    # The conversion bookkeeping is fenced like the Downloader's: a failed
+    # history write must not raise out of the slot, must still emit
+    # history_changed (that is what keeps the History tab honest), and must
+    # let the batch finish instead of stranding it.
+    conv_failed_writes: list[str] = []
+    conv_fired: list[int] = []
+    conv.history_changed.connect(lambda: conv_fired.append(1))
+
+    class _ConvLogCapture(logging.Handler):
+        def emit(self, record):
+            conv_failed_writes.append(record.getMessage())
+
+    def _conv_boom(**kw):
+        raise OSError("disk on fire")
+
+    conv_capture = _ConvLogCapture()
+    logging.getLogger("app.convert_tab").addHandler(conv_capture)
+    real_conv_append = conv._history.append
+    conv._history.append = _conv_boom
+    try:
+        conv._conv_queue = [Path(_TMP_HOME) / "will-fail.wav"]
+        conv._conv_files = [conv._conv_queue[0]]
+        conv._conv_idx = 0
+        conv._conv_total = 1
+        conv._conv_active = True
+        conv._on_conv_fail("boom")
+    finally:
+        conv._history.append = real_conv_append
+        logging.getLogger("app.convert_tab").removeHandler(conv_capture)
+    check(any("disk on fire" in m for m in conv_failed_writes),
+          "the conversion history failure should be logged for diagnosis")
+    check(conv_fired, "history_changed must fire even when the history write fails")
+    check(not conv._conv_active,
+          "the conversion batch must finish even when bookkeeping fails")
+    history_render(hist, w)
+    check(hist._history_list.count() == 3,
+          "a failed history write must not corrupt the rendered history")
 
     # --- About dialog + background yt-dlp update check -----------------------
     # The check must never hit the network during a smoke run and must never

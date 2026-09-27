@@ -172,6 +172,10 @@ def mark_status(item: QListWidgetItem | None, status: str,
     failed) whichever tab it lives in. A missing row (``None``) is a no-op:
     queue edits are blocked mid-batch, so rows stay aligned with the batch
     and a stale index simply means the batch already finished.
+
+    A non-empty *tooltip* is **appended** to whatever the row already shows
+    (its URL/path), never overwriting it — the failure reason and the "what
+    is this row" answer both stay reachable on hover.
     """
     if item is None:
         return
@@ -182,4 +186,8 @@ def mark_status(item: QListWidgetItem | None, status: str,
     if color:
         item.setForeground(QBrush(QColor(color)))
     if tooltip:
-        item.setToolTip(tooltip)
+        existing = item.toolTip()
+        if not existing:
+            item.setToolTip(tooltip)
+        elif tooltip not in existing.splitlines():
+            item.setToolTip(f"{existing}\n{tooltip}")

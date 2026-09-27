@@ -3,7 +3,7 @@
 from pathlib import Path
 from types import SimpleNamespace
 
-from app.utils import open_in_explorer, scan_media_files
+from app.utils import clip_text, open_in_explorer, scan_media_files
 
 
 class TestOpenInExplorer:
@@ -85,3 +85,31 @@ class TestScanMediaFiles:
         # No exception: a vanished/unplugged/unreadable folder must not
         # crash the GUI thread that called this.
         assert scan_media_files(tmp_path / "ghost", {"mp3"}) == ([], False)
+
+
+class TestClipText:
+    """Queue labels are previews — clipping must announce the cut (P1).
+
+    The old raw slices (``identifier[:20]``, ``url[:40]``) hid that anything
+    was missing: no ellipsis, and the full value only on hover (which the
+    rows never had until now).
+    """
+
+    def test_short_text_passes_through_unchanged(self):
+        assert clip_text("[abc123]", 20) == "[abc123]"
+
+    def test_exact_limit_is_not_clipped(self):
+        assert clip_text("a" * 20, 20) == "a" * 20
+
+    def test_long_text_is_clipped_to_the_limit_including_ellipsis(self):
+        out = clip_text("a" * 40, 20)
+        assert out == "a" * 19 + "…"
+        assert len(out) == 20
+
+    def test_unicode_ellipsis_marks_the_cut(self):
+        out = clip_text("https://example.com/very/long/url", 12)
+        assert out.endswith("…") and len(out) == 12
+        assert out.startswith("https://exa")
+
+    def test_tiny_limits_degrade_to_the_ellipsis_only(self):
+        assert clip_text("abcdef", 1) == "…"
