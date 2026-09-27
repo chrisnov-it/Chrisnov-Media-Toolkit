@@ -21,7 +21,8 @@ from __future__ import annotations
 import sys
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QPalette
+from PySide6.QtGui import QColor, QPalette
+from PySide6.QtWidgets import QLineEdit, QPlainTextEdit, QTextEdit, QWidget
 
 from .constants import NEUTRAL_GRAY
 
@@ -117,6 +118,98 @@ def _blend(fg: str, bg: str, t: float) -> str:
     return out
 
 
+def _channel(value: int) -> float:
+    c = value / 255.0
+    return c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4
+
+
+def contrast_ratio(fg: str, bg: str) -> float:
+    """WCAG 2.x contrast ratio between two ``#rrggbb`` colors (1.0 - 21.0)."""
+    def lum(h: str) -> float:
+        return (
+            0.2126 * _channel(int(h[1:3], 16))
+            + 0.7152 * _channel(int(h[3:5], 16))
+            + 0.0722 * _channel(int(h[5:7], 16))
+        )
+
+    la, lb = lum(fg), lum(bg)
+    lighter, darker = max(la, lb), min(la, lb)
+    return (lighter + 0.05) / (darker + 0.05)
+
+
+def muted_color(fg: str, bg: str, *, min_ratio: float = 4.5) -> str:
+    """The *most muted* blend of *fg* toward *bg* that still reaches
+    *min_ratio*:1 contrast against *bg*.
+
+    Secondary text (search placeholder, About credit links) is meant to sit
+    back visually, but the muted grays used for it measured ~2.8-4.0:1 —
+    below WCAG AA. Blending in 5% steps and stopping before the ratio drops
+    keeps the visual hierarchy while guaranteeing readability in whatever
+    palette the app is running in.
+    """
+    best = fg
+    for step in range(21):  # t = 0.00 … 1.00
+        candidate = _blend(fg, bg, step / 20)
+        if contrast_ratio(candidate, bg) < min_ratio:
+            break
+        best = candidate
+    return best
+
+
+def with_aa_placeholder(palette: QPalette) -> QPalette:
+    """Copy of *palette* with an AA-compliant ``PlaceholderText`` role.
+
+    QLineEdit draws its placeholder from the palette's PlaceholderText role
+    (stylesheets have no placeholder pseudo-element), and the system default
+    measured ~4.0:1 on the field background. Only that one role changes, so
+    the rest of the widget palette — and the stylesheet, which reads the
+    *application* palette — stay untouched.
+    """
+    out = QPalette(palette)
+    try:
+        text = palette.color(QPalette.ColorGroup.Active, QPalette.ColorRole.Text).name()
+        base = palette.color(QPalette.ColorGroup.Active, QPalette.ColorRole.Base).name()
+    except (SystemError, RuntimeError, ValueError):
+        return out
+    out.setColor(
+        QPalette.ColorRole.PlaceholderText, QColor(muted_color(text, base))
+    )
+    return out
+
+
+def apply_aa_placeholder(widget: QWidget) -> int:
+    """Give every text-entry widget under *widget* an AA placeholder color.
+
+    Qt hands widgets an **explicit palette snapshot** when they are styled
+    (verified on native Windows: every QLineEdit reported WA_SetPalette with
+    the raw system palette), so a single ``setPalette()`` on the window never
+    reaches them — the search placeholder stayed at ~4.0:1 until the role was
+    set on the edits themselves. The role is written to all three color
+    groups, because an unfocused window renders with the Inactive group.
+    Returns the number of widgets updated.
+    """
+    targets: list[QWidget] = [
+        *widget.findChildren(QLineEdit),
+        *widget.findChildren(QTextEdit),
+        *widget.findChildren(QPlainTextEdit),
+    ]
+    updated = 0
+    for edit in targets:
+        pal = edit.palette()
+        try:
+            text = pal.color(QPalette.ColorGroup.Active, QPalette.ColorRole.Text).name()
+            base = pal.color(QPalette.ColorGroup.Active, QPalette.ColorRole.Base).name()
+        except (SystemError, RuntimeError, ValueError):
+            continue  # palette mid-update: leave the default alone
+        color = QColor(muted_color(text, base))
+        for group in (QPalette.ColorGroup.Active, QPalette.ColorGroup.Inactive,
+                      QPalette.ColorGroup.Disabled):
+            pal.setColor(group, QPalette.ColorRole.PlaceholderText, color)
+        edit.setPalette(pal)
+        updated += 1
+    return updated
+
+
 def widget_stylesheet(palette: QPalette | None = None) -> str:
     """Return MainWindow's widget stylesheet, palette-aware.
 
@@ -153,6 +246,15 @@ def widget_stylesheet(palette: QPalette | None = None) -> str:
     # required: Qt gives ID selectors higher specificity than :disabled, so
     # the blue primary rule otherwise wins and the button looks enabled.
     disabled_text = _blend(button_text, button, 0.45)
+
+    # Frozen controls (batch) must also *look* disabled: the stylesheet sets
+    # an unconditional `color:` on fields/checkboxes/radios, which overrides
+    # the palette's disabled text color, so a frozen combo or checkbox used
+    # to render at full strength and read as editable. Blend toward the
+    # *window* so one color clears 4.5:1 on both backgrounds it is used on
+    # (field surface {base} → 5.3/5.8:1, widget surface {window} →
+    # 4.6/4.9:1 in light/dark) while visibly muting.
+    disabled_field = _blend(window_text, window, 0.45)
 
     fs = _base_font_size()
     ff = _font_family()
@@ -208,6 +310,18 @@ QLineEdit, QComboBox, QListWidget, QDoubleSpinBox, QSpinBox {{
     background: {base};
     color: {text};
     font-size: {fs};
+}}
+QLineEdit:disabled {{
+    color: {disabled_field};
+}}
+QComboBox:disabled {{
+    color: {disabled_field};
+}}
+QSpinBox:disabled {{
+    color: {disabled_field};
+}}
+QDoubleSpinBox:disabled {{
+    color: {disabled_field};
 }}
 QListWidget::item {{
     border-bottom: 1px solid {midlight};
@@ -314,6 +428,38 @@ QPushButton#dangerButton:disabled {{
 QCheckBox, QRadioButton {{
     font-size: {fs};
     color: {window_text};
+}}
+QCheckBox:disabled {{
+    color: {disabled_field};
+}}
+QRadioButton:disabled {{
+    color: {disabled_field};
+}}
+/* Explicit indicator box: the Windows style drew *no* indicator for the
+   checked radio (a selected CBR/normalization mode was invisible in light
+   mode — only the unchecked circles showed), so the indicator is painted by
+   the stylesheet instead of delegated to the platform style. */
+QRadioButton::indicator {{
+    width: 14px;
+    height: 14px;
+    border: 1px solid {mid};
+    border-radius: 7px;
+    background: {base};
+}}
+QRadioButton::indicator:hover {{
+    border-color: {highlight};
+}}
+QRadioButton::indicator:checked {{
+    border: 1px solid {highlight};
+    background: {highlight};
+}}
+QRadioButton:disabled::indicator {{
+    border-color: {midlight};
+    background: {base};
+}}
+QRadioButton:disabled::indicator:checked {{
+    border-color: {mid};
+    background: {mid};
 }}
 QProgressBar {{
     min-height: 14px;

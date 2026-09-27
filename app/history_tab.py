@@ -12,6 +12,7 @@ import time
 from pathlib import Path
 
 from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QComboBox,
     QHBoxLayout,
@@ -27,7 +28,7 @@ from PySide6.QtWidgets import (
 )
 
 from .history import DownloadHistory
-from .utils import open_in_explorer
+from .utils import install_placeholder, open_in_explorer
 
 
 def _fmt_size(n: int) -> str:
@@ -73,6 +74,13 @@ class HistoryTab(QWidget):
         )
         header.addWidget(self._history_summary)
         header.addStretch()
+        self._history_remove_btn = QPushButton("Remove")
+        self._history_remove_btn.setToolTip(
+            "Remove the selected entry from the history (or press Delete)"
+        )
+        self._history_remove_btn.setEnabled(False)
+        self._history_remove_btn.clicked.connect(self._on_history_remove)
+        header.addWidget(self._history_remove_btn)
         self._history_clear_btn = QPushButton("Clear All")
         self._history_clear_btn.clicked.connect(self._on_history_clear)
         header.addWidget(self._history_clear_btn)
@@ -96,21 +104,31 @@ class HistoryTab(QWidget):
         self._history_list.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self._history_list.setWordWrap(True)
         self._history_list.itemDoubleClicked.connect(self._on_history_item_action)
+        self._history_list.itemSelectionChanged.connect(self._sync_remove_button)
         root.addWidget(self._history_list, 1)
+
+        # Empty-state placeholder — rendered *inside* the list box (P2): the
+        # old label sat below the list, so the order was list → legend →
+        # message and the empty box itself looked broken. The wording still
+        # flips between "no downloads yet" and "no matches" in refresh().
+        self._history_empty = install_placeholder(
+            self._history_list,
+            "No downloads yet.\nPress Start to begin downloading.",
+        )
+
+        # Delete removes the selected row (same action as the Remove button;
+        # scoped to this list so Delete in the search field keeps deleting
+        # text).
+        del_sc = QShortcut(QKeySequence(QKeySequence.StandardKey.Delete),
+                           self._history_list)
+        del_sc.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
+        del_sc.activated.connect(self._on_history_remove)
 
         # Legend
         legend = QLabel("\U0001f4c2 = Open folder   \U0001f501 = Download again")
         legend.setStyleSheet("color: palette(text); font-size: 7pt;")
         legend.setAlignment(Qt.AlignmentFlag.AlignCenter)
         root.addWidget(legend)
-
-        # Empty state placeholder
-        self._history_empty = QLabel("No downloads yet.\nPress Start to begin downloading.")
-        self._history_empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._history_empty.setStyleSheet(
-            "color: palette(text); font-size: 9pt; padding: 40px;"
-        )
-        root.addWidget(self._history_empty)
 
     # ------------------------------------------------------------------ #
     #  Rendering and actions                                               #
@@ -135,9 +153,7 @@ class HistoryTab(QWidget):
         n_shown = 0
         total_bytes = 0
 
-        for entry in self._history.entries:
-            total_bytes += entry.get("filesize_bytes", 0)
-
+        for model_index, entry in enumerate(self._history.entries):
             # Filter by type
             if filter_type != "All" and entry.get("type", "").lower() != filter_type.lower():
                 continue
@@ -148,7 +164,11 @@ class HistoryTab(QWidget):
                 if query not in haystack:
                     continue
 
+            # Only visible rows count towards the summary: summing every
+            # entry (before the filters) left "(3 items …)" on screen while
+            # one filtered row was actually shown.
             n_shown += 1
+            total_bytes += entry.get("filesize_bytes", 0)
             filename = entry.get("filename", "?")
             filesize = entry.get("filesize_bytes", 0)
             status = entry.get("status", "?")
@@ -179,6 +199,11 @@ class HistoryTab(QWidget):
             )
             item = QListWidgetItem(display)
             item.setData(Qt.ItemDataRole.UserRole, entry)
+            # Where this row lives in the *model*: under a search/type filter
+            # the visible row number is not the model number, and item.data()
+            # hands back a *copy* of the dict, so identity matching cannot
+            # recover it (Remove needs the real model index).
+            item.setData(Qt.ItemDataRole.UserRole + 1, model_index)
             # Failed entries carry their reason: show it inline (the list
             # word-wraps) and in the tooltip, since the queue row that
             # originally held the error resets with the batch.
@@ -188,10 +213,16 @@ class HistoryTab(QWidget):
                 item.setToolTip(error)
             self._history_list.addItem(item)
 
-        # Update summary
-        self._history_summary.setText(
-            f"({n_total} items, {_fmt_size(total_bytes)} total)"
-        )
+        # Update summary — the numbers describe what is on screen, so a
+        # filter narrows them too ("1 of 2 items … shown").
+        if n_shown == n_total:
+            self._history_summary.setText(
+                f"({n_total} items, {_fmt_size(total_bytes)} total)"
+            )
+        else:
+            self._history_summary.setText(
+                f"({n_shown} of {n_total} items, {_fmt_size(total_bytes)} shown)"
+            )
         # Empty-state wording depends on *why* nothing is shown: an empty
         # history says "no downloads yet", a filter that hides every row
         # says "no matches" — never both claims at once.
@@ -226,6 +257,30 @@ class HistoryTab(QWidget):
             return
         self._history.clear()
         self.refresh()
+
+    def _sync_remove_button(self) -> None:
+        """Remove only makes sense with a selected row."""
+        self._history_remove_btn.setEnabled(bool(self._history_list.selectedItems()))
+
+    def _on_history_remove(self) -> None:
+        """Delete the selected entry (Remove button / Delete key).
+
+        The row carries the entry *and* its model index, so removal works
+        from a filtered view too — the visible row number is not the model
+        number once a search or type filter is active. Nothing happens when
+        the selection is empty or the model already moved on (remove_at is
+        bounds-checked).
+        """
+        item = self._history_list.currentItem()
+        if item is None:
+            return
+        model_index = item.data(Qt.ItemDataRole.UserRole + 1)
+        if not isinstance(model_index, int):
+            return
+        if not self._history.remove_at(model_index):
+            return
+        self.refresh()
+        self._sync_remove_button()
 
     def _on_history_item_action(self, item: QListWidgetItem) -> None:
         """Handle double-click on a history item: Open Folder or Re-download."""

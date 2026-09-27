@@ -24,8 +24,16 @@ import time
 from pathlib import Path
 
 from PySide6.QtCore import QEvent, QSize, Qt, QThread, QTimer, Signal
-from PySide6.QtGui import QCloseEvent, QDragEnterEvent, QDropEvent, QKeySequence, QShortcut
+from PySide6.QtGui import (
+    QCloseEvent,
+    QDragEnterEvent,
+    QDropEvent,
+    QKeySequence,
+    QPalette,
+    QShortcut,
+)
 from PySide6.QtWidgets import (
+    QApplication,
     QDialog,
     QFrame,
     QHBoxLayout,
@@ -38,7 +46,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from .constants import APP_VERSION, CONFIG_DIR, NEUTRAL_GRAY
+from .constants import APP_VERSION, CONFIG_DIR
 from .convert_tab import AudioConverterTab
 from .download_tab import DownloadTab
 from .ffmpeg_utils import find_ffmpeg, find_ffprobe, probe_version
@@ -46,7 +54,7 @@ from .history import DownloadHistory
 from .history_tab import HistoryTab
 from .icon import bundled_icon, palette_icon_color
 from .settings import AppSettings
-from .theme import widget_stylesheet
+from .theme import apply_aa_placeholder, muted_color, widget_stylesheet, with_aa_placeholder
 from .update_check import UpdateCheckWorker
 from .video_convert_tab import VideoConvertTab
 from .worker_tracking import WorkerTracker
@@ -87,9 +95,17 @@ class _FFmpegVersionWorker(QThread):
 class MainWindow(QWidget):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle(f"Chrisnov Media Toolkit v{APP_VERSION}")
+        #: Title without any batch marker — what a new batch (and the app
+        #: at rest) shows; batch_finished appends "✓ Done (x/y)".
+        self._base_title = f"Chrisnov Media Toolkit v{APP_VERSION}"
+        self.setWindowTitle(self._base_title)
         self.setMinimumSize(700, 480)
-        self.resize(900, 620)
+        # 700 (not 620): the Downloader tab's natural height is ~605 px, so
+        # at 620 the progress bar and status line sat below the fold (65 px
+        # of scroll) — the batch's only progress feedback required scrolling
+        # to see. Everything fits without scrolling at the default size now;
+        # smaller windows still scroll via the per-tab QScrollArea.
+        self.resize(900, 700)
         self.setAcceptDrops(True)
 
         self._settings = AppSettings()
@@ -120,8 +136,41 @@ class MainWindow(QWidget):
         self.audio_tab.history_changed.connect(self.history_tab.refresh)
         self.video_tab.history_changed.connect(self.history_tab.refresh)
         self.history_tab.requeue_requested.connect(self._requeue_download)
+        # Batch lifecycle → window title (P2: a finished batch used to leave
+        # no trace: no tray, no flash, no title change).
+        for tab in (self.download_tab, self.audio_tab, self.video_tab):
+            tab.batch_started.connect(self._on_batch_started)
+            tab.batch_finished.connect(self._on_batch_finished)
+
+        # AA-compliant placeholder text for every QLineEdit in the window.
+        # Set on the window (not the app) so children inherit it and the
+        # system theme change below can simply re-apply it — and on the
+        # edits themselves, since Qt keeps explicit palette snapshots on
+        # them (a window-level setPalette() alone never reaches them).
+        self.setPalette(with_aa_placeholder(self.palette()))
+        apply_aa_placeholder(self)
 
         self.history_tab.refresh()
+
+    # ------------------------------------------------------------------ #
+    #  Batch completion → window title + taskbar attention                #
+    # ------------------------------------------------------------------ #
+
+    def _on_batch_started(self) -> None:
+        """Drop any "✓ Done" marker as soon as a new batch is running."""
+        if self.windowTitle() != self._base_title:
+            self.setWindowTitle(self._base_title)
+
+    def _on_batch_finished(self, done: int, total: int) -> None:
+        """Mark the title and ask the taskbar for attention.
+
+        The app had no completion signal anywhere — the window title only
+        ever showed the version, so a long batch finishing in the background
+        was invisible. QApplication.alert() flashes the taskbar entry until
+        the window is focused (a no-op when it is already active).
+        """
+        self.setWindowTitle(f"✓ Done ({done}/{total}) — {self._base_title}")
+        QApplication.alert(self, 5000)
 
     # ------------------------------------------------------------------ #
     #  Theme change handling                                                #
@@ -149,6 +198,12 @@ class MainWindow(QWidget):
             self._theme_refreshing = True
             try:
                 self.setStyleSheet(widget_stylesheet())
+                # The system palette (incl. PlaceholderText) just changed, so
+                # the AA placeholder override has to be re-derived from it.
+                # Inside the guard: setPalette also fires PaletteChange, and
+                # re-styling re-snapshots the line edits' palettes.
+                self.setPalette(with_aa_placeholder(self.palette()))
+                apply_aa_placeholder(self)
                 self._refresh_tab_icons()
             finally:
                 self._theme_refreshing = False
@@ -248,6 +303,16 @@ class MainWindow(QWidget):
                             added += int(self.audio_tab.add_file(path))
                 if added:
                     event.acceptProposedAction()
+                else:
+                    # Silent drops looked like the app was broken (P2).
+                    self.audio_tab.conv_status_label.setText(
+                        "Nothing added — drop audio files or a folder."
+                    )
+            elif md.hasText():
+                self.audio_tab.conv_status_label.setText(
+                    "Nothing to convert here — drop audio files or a folder, "
+                    "not text."
+                )
             return
         if tab == 2:
             # Video converter tab — accept local files/folders
@@ -269,6 +334,15 @@ class MainWindow(QWidget):
                             added += int(self.video_tab.add_file(path))
                 if added:
                     event.acceptProposedAction()
+                else:
+                    self.video_tab.video_conv_status_label.setText(
+                        "Nothing added — drop video files or a folder."
+                    )
+            elif md.hasText():
+                self.video_tab.video_conv_status_label.setText(
+                    "Nothing to convert here — drop video files or a folder, "
+                    "not text."
+                )
             return
         # Downloader tab (also serves the History tab)
         if self.download_tab.is_active:
@@ -301,9 +375,18 @@ class MainWindow(QWidget):
                     added += 1
             if added:
                 event.acceptProposedAction()
+                self._show_downloader_after_queue()
+            elif not md.hasText():
+                # e.g. a media file dropped on the Downloader: explain instead
+                # of doing nothing.
+                self.download_tab.status_label.setText(
+                    "Nothing queued — drop http(s) links, a .txt of links, "
+                    "or paste with Ctrl+V."
+                )
         elif md.hasText():
             self.download_tab.add_urls_from_text(md.text())
             event.acceptProposedAction()
+            self._show_downloader_after_queue()
 
     # ------------------------------------------------------------------ #
     #  Cross-tab slots                                                     #
@@ -313,6 +396,16 @@ class MainWindow(QWidget):
         """History wants a re-download: switch to the Downloader tab and queue."""
         self._tabs.setCurrentIndex(0)
         self.download_tab.requeue(url, filename)
+
+    def _show_downloader_after_queue(self) -> None:
+        """Dropped/pasted URLs land in the Downloader's queue — go look at it.
+
+        Dropping a link while the History tab was open queued it silently on
+        a tab the user could not see (the requeue action already switched
+        tabs; the drop path did not).
+        """
+        if self._tabs.currentIndex() != 0:
+            self._tabs.setCurrentIndex(0)
 
     # ------------------------------------------------------------------ #
     #  Top-level UI                                                        #
@@ -397,6 +490,21 @@ class MainWindow(QWidget):
     # ------------------------------------------------------------------ #
     #  About dialog                                                         #
     # ------------------------------------------------------------------ #
+
+    def _about_link_color(self) -> str:
+        """Muted-but-readable link color for the About dialog's footer.
+
+        Derived from the live palette through theme.muted_color(), so it
+        clears WCAG AA (4.5:1) in both light and dark mode — the previous
+        hardcoded gray measured ~2.8:1 on the light window (P2).
+        """
+        pal = self.palette()
+        try:
+            fg = pal.color(QPalette.ColorRole.WindowText).name()
+            bg = pal.color(QPalette.ColorRole.Window).name()
+        except (SystemError, RuntimeError, ValueError):
+            return "#808080"  # palette mid-update: legible neutral
+        return muted_color(fg, bg)
 
     def _show_about(self) -> None:
         """Show the About dialog with version, runtime, and dependency info."""
@@ -496,7 +604,11 @@ class MainWindow(QWidget):
         layout.addWidget(desc)
 
         credit = QLabel(
-            f'<a href="https://chrisnov.com" style="color:{NEUTRAL_GRAY};text-decoration:none;">'
+            # Secondary link text must still clear WCAG AA: the hardcoded
+            # muted gray measured ~2.8:1 on the light window (P2), so the
+            # color is derived from the live palette instead.
+            f'<a href="https://chrisnov.com" style="color:{self._about_link_color()};'
+            'text-decoration:none;">'
             '© Chrisnov IT Solutions</a>'
         )
         credit.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -505,7 +617,8 @@ class MainWindow(QWidget):
         layout.addWidget(credit)
 
         gh_link = QLabel(
-            f'<a href="https://github.com/chrisnov-it" style="color:{NEUTRAL_GRAY};text-decoration:none;">'
+            f'<a href="https://github.com/chrisnov-it" style="color:'
+            f'{self._about_link_color()};text-decoration:none;">'
             "chrisnov-it on GitHub</a>"
         )
         gh_link.setAlignment(Qt.AlignmentFlag.AlignCenter)

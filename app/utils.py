@@ -6,9 +6,9 @@ import os
 from collections.abc import Iterable
 from pathlib import Path
 
-from PySide6.QtCore import QUrl
+from PySide6.QtCore import QEvent, Qt, QUrl
 from PySide6.QtGui import QDesktopServices
-from PySide6.QtWidgets import QWidget
+from PySide6.QtWidgets import QLabel, QListWidget, QWidget
 
 #: Tooltip swapped onto controls while a batch freezes them. Tooltips *do*
 #: fire on disabled widgets (verified on native Windows), so this is the one
@@ -18,6 +18,11 @@ BATCH_BUSY_HINT = "Unavailable while a batch is running."
 #: Attribute used by set_controls_busy() to remember the tooltip a widget had
 #: before the batch took it over (so the original text comes back after).
 _SAVED_TIP_ATTR = "_saved_busy_tip"
+
+#: Same idea for the enabled state: some controls are *already* off outside a
+#: batch (bitrate in video mode, the cleanup-tag field with Clean title off).
+#: Unfreezing must restore what was there, not blindly re-enable everything.
+_SAVED_ENABLED_ATTR = "_saved_busy_enabled"
 
 
 def clip_text(text: str, max_len: int) -> str:
@@ -38,20 +43,91 @@ def set_controls_busy(controls: Iterable[QWidget], busy: bool) -> None:
     """Freeze/unfreeze *controls* for a batch, with an explanatory tooltip.
 
     While busy each control is disabled and its tooltip is replaced by
-    BATCH_BUSY_HINT; the original tooltip is restored on unfreeze (kept on
-    the widget as a Python attribute, so callers can toggle freely).
+    BATCH_BUSY_HINT; on unfreeze the original tooltip **and** the original
+    enabled state come back (both kept as Python attributes, so callers can
+    toggle freely). Restoring the state — instead of forcing enabled — is
+    what lets the Downloader freeze settings that are legitimately off
+    outside a batch (bitrate in video mode, the cleanup-tag field with
+    Clean title off) without switching them on behind the user's back.
     """
     for widget in controls:
         if busy:
             if not hasattr(widget, _SAVED_TIP_ATTR):
                 setattr(widget, _SAVED_TIP_ATTR, widget.toolTip())
+            if not hasattr(widget, _SAVED_ENABLED_ATTR):
+                setattr(widget, _SAVED_ENABLED_ATTR, widget.isEnabled())
             widget.setToolTip(BATCH_BUSY_HINT)
+            widget.setEnabled(False)
         else:
             saved = getattr(widget, _SAVED_TIP_ATTR, None)
             if saved is not None:
                 widget.setToolTip(saved)
                 delattr(widget, _SAVED_TIP_ATTR)
-        widget.setEnabled(not busy)
+            saved_enabled = getattr(widget, _SAVED_ENABLED_ATTR, None)
+            if saved_enabled is not None:
+                widget.setEnabled(saved_enabled)
+                delattr(widget, _SAVED_ENABLED_ATTR)
+
+
+class ListPlaceholder(QLabel):
+    """Centred empty-state hint rendered *inside* a list widget.
+
+    The empty states used to be plain labels stacked **below** the list —
+    the queue box itself looked broken/empty, and in History the order was
+    list → legend → message. Parenting the label to the list's viewport
+    puts the hint where the missing rows would be; the model signals keep
+    it in sync (visible iff the list has no rows) and the viewport resize
+    keeps it centred when the window grows.
+    """
+
+    def __init__(self, list_widget: QListWidget, text: str) -> None:
+        super().__init__(text, list_widget.viewport())
+        self._list = list_widget
+        self.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.setWordWrap(True)
+        self.setStyleSheet("color: palette(text); font-size: 9pt; padding: 24px;")
+        # Clicks/selection must reach the list (and its scrollbar), never me.
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        model = list_widget.model()
+        model.rowsInserted.connect(self.sync)
+        model.rowsRemoved.connect(self.sync)
+        model.modelReset.connect(self.sync)
+        model.layoutChanged.connect(self.sync)
+        list_widget.viewport().installEventFilter(self)
+        self.sync()
+
+    def sync(self, *_args) -> None:
+        """Re-centre the label and show it iff the list is empty."""
+        self.setGeometry(self._list.viewport().rect())
+        self.setVisible(self._list.count() == 0)
+
+    def eventFilter(self, obj, event) -> bool:
+        if event.type() in (QEvent.Type.Resize, QEvent.Type.Show):
+            self.sync()
+        return False
+
+
+def install_placeholder(list_widget: QListWidget, text: str) -> ListPlaceholder:
+    """Give *list_widget* an in-list empty-state hint (see ListPlaceholder)."""
+    return ListPlaceholder(list_widget, text)
+
+
+def open_result(path: str | Path) -> bool:
+    """Open a finished result: files with the default app, folders in the
+    file manager.
+
+    The status lines only *reported* the last result ("Done → name",
+    "Cleaned N file(s)") with no way to act on it — this is the action the
+    "Open last result" buttons call. Returns False when there is nothing to
+    open (missing/empty path) so the caller can explain instead of silently
+    launching nothing.
+    """
+    if not path:
+        return False
+    target = Path(path)
+    if not target.exists():
+        return False
+    return bool(QDesktopServices.openUrl(QUrl.fromLocalFile(str(target))))
 
 
 def open_in_explorer(path: str) -> None:

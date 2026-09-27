@@ -59,9 +59,16 @@ from .constants import (
 )
 from .history import DownloadHistory
 from .icon import mark_status
+from .progress import EtaEstimator
 from .settings import AppSettings
 from .theme import _base_font_size as _font_size
-from .utils import clip_text, open_in_explorer, set_controls_busy
+from .utils import (
+    clip_text,
+    install_placeholder,
+    open_in_explorer,
+    open_result,
+    set_controls_busy,
+)
 from .worker import (
     DownloadWorker,
     FileSizeWorker,
@@ -112,6 +119,10 @@ class DownloadTab(QWidget):
     #: Emitted after every history append (success or failure) so the
     #: History tab can re-render itself.
     history_changed = Signal()
+    #: Emitted when a batch starts / finishes so MainWindow can mark the
+    #: window title (a finished batch used to leave no trace anywhere).
+    batch_started = Signal()
+    batch_finished = Signal(int, int)  # done, total
 
     def __init__(self, settings: AppSettings, history: DownloadHistory,
                  parent: QWidget | None = None) -> None:
@@ -125,6 +136,14 @@ class DownloadTab(QWidget):
         self._inspect_worker: PlaylistInspectWorker | None = None
         self._info_worker: FileSizeWorker | None = None
         self._batch: BatchState | None = None
+        #: Last file (or folder, for playlists) that finished — what the
+        #: "Open last result" button opens (the status line alone only said
+        #: "Cleaned N file(s)…" with no way to act on it).
+        self._last_result: Path | None = None
+        #: Progress-bar ETA state for the current item (see _on_dl_progress).
+        self._eta = EtaEstimator()
+        self._eta_label = "%p%"
+        self._eta_format = "%p%"
 
         # Cookie settings for authenticated downloads (Instagram, Vimeo
         # private, etc.)
@@ -193,6 +212,11 @@ class DownloadTab(QWidget):
         self.queue_list.setIconSize(QSize(14, 14))
         self.queue_list.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         root.addWidget(self.queue_list, 1)
+        # In-list empty state (P2): the Downloader had no placeholder at
+        # all, so an empty queue was just a blank box.
+        self.queue_placeholder = install_placeholder(
+            self.queue_list, "No URLs queued yet.\nPaste or drop URLs here (Ctrl+V)."
+        )
 
         qrow = QHBoxLayout()
         self.remove_btn = QPushButton("Remove")
@@ -340,6 +364,16 @@ class DownloadTab(QWidget):
         self.cancel_btn.setEnabled(False)
         btn_row.addWidget(self.download_btn)
         btn_row.addWidget(self.cancel_btn)
+        btn_row.addStretch()
+        # The status line reports the last result but could not act on it.
+        self.open_last_btn = QPushButton("Open last result")
+        self.open_last_btn.setEnabled(False)
+        self.open_last_btn.setToolTip(
+            "Open the last finished file with your default app "
+            "(a playlist opens its folder)."
+        )
+        self.open_last_btn.clicked.connect(self._open_last_result)
+        btn_row.addWidget(self.open_last_btn)
         root.addLayout(btn_row)
 
         self.dl_progress = QProgressBar()
@@ -362,9 +396,45 @@ class DownloadTab(QWidget):
         paste_sc.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
         paste_sc.activated.connect(self._paste_clipboard)
 
+        # Everything _start_download() snapshots into BatchState: frozen for
+        # the whole batch like the converter tabs do (P2). Editing any of
+        # these mid-run could never apply — the batch reads its snapshot —
+        # yet they all stayed clickable.
+        self._batch_settings_widgets = (
+            self.download_btn, self.add_queue_btn, self.url_input,
+            self.remove_btn, self.clear_btn, self.info_btn,
+            self.audio_only_chk, self.skip_dup_chk, self.clean_chk,
+            self.embed_meta_chk, self.embed_thumb_chk,
+            self.cookies_browser_chk, self.cookie_path_btn,
+            self.clean_tags_input, self.res_combo, self.container_combo,
+            self.bitrate_combo, self.dir_input, self.browse_btn,
+        )
+
     # ------------------------------------------------------------------ #
     #  URL helpers                                                         #
     # ------------------------------------------------------------------ #
+
+    def _set_batch_busy(self, busy: bool) -> None:
+        """Freeze/unfreeze the queue *and* the settings for a batch.
+
+        set_controls_busy() restores each control's own pre-batch state, so
+        controls that are legitimately off (bitrate in video mode, the
+        cleanup-tag field with Clean title off) come back off.
+        """
+        set_controls_busy(self._batch_settings_widgets, busy)
+
+    def _set_last_result(self, path: Path) -> None:
+        """Publish the file/folder that just finished to the Open button."""
+        self._last_result = path
+        self.open_last_btn.setEnabled(True)
+        self.open_last_btn.setToolTip(f"Open last result: {path}")
+
+    def _open_last_result(self) -> None:
+        """Open the last finished result (P2: the status line only said so)."""
+        if self._last_result is None:
+            return
+        if not open_result(self._last_result):
+            self.status_label.setText(f"Result not found: {self._last_result}")
 
     def _add_urls_from_text(self, text: str) -> None:
         n_added = 0
@@ -376,7 +446,14 @@ class DownloadTab(QWidget):
                 if token.startswith(("http://", "https://")):
                     self._add_url(token)
                     n_added += 1
-        self.status_label.setText(f"Added {n_added} URL(s) to queue.")
+        # "Added 0 URL(s)" told the user nothing — a dropped paragraph or a
+        # random file used to look like a silent no-op.
+        if n_added:
+            self.status_label.setText(f"Added {n_added} URL(s) to queue.")
+        else:
+            self.status_label.setText(
+                "No http(s) URLs found — paste links, a .txt of links, or a URL list."
+            )
 
     def _paste_clipboard(self) -> None:
         """Ctrl+V/Cmd+V outside text fields: queue every URL in the clipboard."""
@@ -672,6 +749,7 @@ class DownloadTab(QWidget):
             archive_path=self._resolve_archive(audio_only),
         )
         self._batch = batch
+        self.batch_started.emit()
 
         # Cancel any in-flight info fetch
         if self._info_worker is not None and self._info_worker.isRunning():
@@ -683,13 +761,11 @@ class DownloadTab(QWidget):
 
         # Disable UI immediately so the user can't double-submit or touch
         # the queue mid-batch (edits can't reach the running snapshot and
-        # would be wiped by the batch reset). The controls also get a tooltip
-        # explaining the freeze (tooltips still fire on disabled widgets).
-        set_controls_busy(
-            (self.download_btn, self.add_queue_btn, self.url_input,
-             self.remove_btn, self.clear_btn),
-            True,
-        )
+        # would be wiped by the batch reset). Queue *and* settings both —
+        # the batch reads its snapshot, so a live setting could only lie.
+        # The controls also get a tooltip explaining the freeze (tooltips
+        # still fire on disabled widgets).
+        self._set_batch_busy(True)
         self.cancel_btn.setEnabled(True)
 
         playlist_urls = [u for u in batch.urls if self._is_playlist_url(u)]
@@ -784,12 +860,22 @@ class DownloadTab(QWidget):
                 f"Queue finished: {batch.done}/{batch.total} completed."
             )
             self.dl_progress.setValue(0)
+            # Tell the window before the state resets (P2: a finished batch
+            # used to leave no trace — the title only ever showed the version).
+            self.batch_finished.emit(batch.done, batch.total)
             self._reset_after_batch()
             return
         url = batch.urls[batch.idx]
         idx_label = f"[{batch.idx + 1}/{batch.total}]"
         self.status_label.setText(f"{idx_label} Starting: {url}")
         self.dl_progress.setValue(0)
+        # Progress bar carries the position + a live ETA while downloading
+        # (same pattern as the converter tabs; download progress spans the
+        # full 0-100 range for each item).
+        self._eta_label = f"{idx_label} %p%"
+        self._eta_format = self._eta_label
+        self.dl_progress.setFormat(self._eta_label)
+        self._eta.reset(0, 100)
         self._mark_queue_item(batch.idx, "running")
 
         self.worker = DownloadWorker(
@@ -809,11 +895,27 @@ class DownloadTab(QWidget):
             cookies_from_browser=self.cookies_from_browser,
         )
         self._tracker.track(self.worker)
-        self.worker.progress.connect(self.dl_progress.setValue)
+        self.worker.progress.connect(self._on_dl_progress)
         self.worker.status.connect(self.status_label.setText)
         self.worker.finished_ok.connect(self._on_item_ok)
         self.worker.failed.connect(self._on_item_fail)
         self.worker.start()
+
+    def _on_dl_progress(self, pct: int) -> None:
+        """Update the bar and show a live ETA once estimable.
+
+        setFormat() triggers a relayout, so it is only called when the
+        displayed string actually changes (yt-dlp progress emits fast).
+        """
+        self.dl_progress.setValue(pct)
+        eta = self._eta.update(pct)
+        fmt = (
+            f"{self._eta_label} • ETA {eta}" if eta is not None
+            else self._eta_label
+        )
+        if fmt != self._eta_format:
+            self._eta_format = fmt
+            self.dl_progress.setFormat(fmt)
 
     def _on_item_ok(self, path: str) -> None:
         batch = self._batch
@@ -845,6 +947,7 @@ class DownloadTab(QWidget):
                     audio_only=batch.audio_only, status="completed",
                 )
                 completed = True
+                self._set_last_result(Path(batch.outdir))
             else:
                 final_path, renamed = self._finish_single_file(path, batch)
                 if final_path.exists():
@@ -856,6 +959,7 @@ class DownloadTab(QWidget):
                         status="completed",
                     )
                     completed = True
+                    self._set_last_result(final_path)
                 else:
                     # yt-dlp can report success for something we cannot find
                     # (removed/moved externally, or a path we failed to
@@ -1078,9 +1182,9 @@ class DownloadTab(QWidget):
         # object alive until its thread has fully exited.
         self.worker = None
         self._batch = None
-        set_controls_busy(
-            (self.download_btn, self.add_queue_btn, self.url_input,
-             self.remove_btn, self.clear_btn),
-            False,
-        )
+        self._set_batch_busy(False)
+        # Reset the bar's format: the "[i/n] … ETA" string is per-batch.
+        self._eta_label = "%p%"
+        self._eta_format = "%p%"
+        self.dl_progress.setFormat("%p%")
         self.cancel_btn.setEnabled(False)

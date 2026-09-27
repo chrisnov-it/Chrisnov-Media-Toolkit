@@ -158,6 +158,41 @@ def test_clear_persists_empty(tmp_path):
     assert data["items"] == []
 
 
+def test_remove_at_drops_one_entry_and_persists(tmp_path):
+    """The History tab could only Clear *All*; removing a single row needs a
+    model-side counterpart that is safe to call from a Qt slot."""
+    h = make_history(tmp_path)
+    for name in ("a", "b", "c"):
+        h.append(url=f"https://x/{name}", filepath="f", filename=name,
+                 filesize=1, type_="audio", container="mp3",
+                 audio_only=True, status="completed")
+    assert h.remove_at(1) is True
+    assert [e["filename"] for e in h.entries] == ["c", "a"]
+    # …and the removal survives a reload (persisted, not just in memory).
+    h2 = make_history(tmp_path)
+    h2.load()
+    assert [e["filename"] for e in h2.entries] == ["c", "a"]
+
+
+def test_remove_at_is_bounds_checked(tmp_path):
+    """A row index comes from a *filtered* view: a stale index must be a
+    no-op, never an IndexError escaping into a Qt slot."""
+    h = make_history(tmp_path)
+    h.append(url="u", filepath="f", filename="n", filesize=1,
+             type_="audio", container="mp3", audio_only=True,
+             status="completed")
+    for bad in (-1, 1, 999):
+        assert h.remove_at(bad) is False, f"remove_at({bad}) must be a no-op"
+    assert len(h.entries) == 1
+
+
+def test_remove_at_on_empty_history_is_a_noop(tmp_path):
+    h = make_history(tmp_path)
+    h.load()
+    assert h.remove_at(0) is False
+    assert h.entries == []
+
+
 def test_save_is_atomic_and_leaves_no_temp_file(tmp_path):
     """The payload goes to a sibling .tmp and is moved into place, so a crash
     mid-write can never truncate the file the next load() reads."""

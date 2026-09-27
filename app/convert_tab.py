@@ -54,7 +54,13 @@ from .history import DownloadHistory
 from .icon import mark_status
 from .progress import EtaEstimator
 from .settings import AppSettings
-from .utils import open_in_explorer, scan_media_files, set_controls_busy
+from .utils import (
+    install_placeholder,
+    open_in_explorer,
+    open_result,
+    scan_media_files,
+    set_controls_busy,
+)
 from .worker_tracking import WorkerTracker
 
 log = logging.getLogger(__name__)
@@ -66,6 +72,10 @@ class AudioConverterTab(QWidget):
     #: Emitted after a conversion outcome lands in the shared history, so
     #: MainWindow can refresh the History tab (same pattern as DownloadTab).
     history_changed = Signal()
+    #: Emitted when a batch starts / finishes so MainWindow can mark the
+    #: window title (same contract as DownloadTab).
+    batch_started = Signal()
+    batch_finished = Signal(int, int)  # done, total
 
     def __init__(self, settings: AppSettings,
                  tags_provider: Callable[[], str],
@@ -86,6 +96,8 @@ class AudioConverterTab(QWidget):
         self._conv_clean_tags: list[str] | None = None  # snapshotted at start
         self._eta = EtaEstimator()
         self._eta_format = "%p%"
+        #: Last converted file — what "Open last result" opens.
+        self._last_result: Path | None = None
         self._build_ui()
 
     # ------------------------------------------------------------------ #
@@ -127,15 +139,12 @@ class AudioConverterTab(QWidget):
         )
         root.addWidget(self.conv_file_list, 1)
 
-        # Empty-state placeholder (mirrors the History tab)
-        self._conv_empty = QLabel(
-            "No files yet.\nAdd files or a folder to get started."
+        # Empty-state placeholder rendered *inside* the list box (P2) —
+        # the old label sat below it as a separate row.
+        self._conv_empty = install_placeholder(
+            self.conv_file_list,
+            "No files yet.\nAdd files or a folder to get started.",
         )
-        self._conv_empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._conv_empty.setStyleSheet(
-            "color: palette(text); font-size: 9pt; padding: 40px;"
-        )
-        root.addWidget(self._conv_empty)
 
         fbtn_row = QHBoxLayout()
         self.conv_add_files_btn = QPushButton("Files")
@@ -283,6 +292,15 @@ class AudioConverterTab(QWidget):
         self.conv_cancel_btn.setEnabled(False)
         btn_row.addWidget(self.conv_start_btn)
         btn_row.addWidget(self.conv_cancel_btn)
+        btn_row.addStretch()
+        # "Done → name" was unactionable (P2): this opens the file.
+        self.open_last_btn = QPushButton("Open last result")
+        self.open_last_btn.setEnabled(False)
+        self.open_last_btn.setToolTip(
+            "Open the last converted file with your default app."
+        )
+        self.open_last_btn.clicked.connect(self._open_last_result)
+        btn_row.addWidget(self.open_last_btn)
         root.addLayout(btn_row)
 
         self.conv_progress = QProgressBar()
@@ -315,10 +333,6 @@ class AudioConverterTab(QWidget):
     #  File list helpers                                                   #
     # ------------------------------------------------------------------ #
 
-    def _refresh_conv_empty(self) -> None:
-        """Show the empty-state placeholder iff the file list has no rows."""
-        self._conv_empty.setVisible(self.conv_file_list.count() == 0)
-
     def _mark_conv_item(self, row: int, status: str,
                         tooltip: str = "") -> None:
         """Give a file row its batch status (icon + color + tooltip).
@@ -327,6 +341,21 @@ class AudioConverterTab(QWidget):
         icon.mark_status(), so all three read identically.
         """
         mark_status(self.conv_file_list.item(row), status, tooltip)
+
+    def _set_last_result(self, path: Path) -> None:
+        """Publish the file that just converted to the Open button."""
+        self._last_result = path
+        self.open_last_btn.setEnabled(True)
+        self.open_last_btn.setToolTip(f"Open last result: {path}")
+
+    def _open_last_result(self) -> None:
+        """Open the last converted file (P2: "Done → name" was read-only)."""
+        if self._last_result is None:
+            return
+        if not open_result(self._last_result):
+            self.conv_status_label.setText(
+                f"Result not found: {self._last_result}"
+            )
 
     def _conv_add_file(self, path: Path) -> None:
         """Add a single file to the converter queue (dedup by path)."""
@@ -343,7 +372,6 @@ class AudioConverterTab(QWidget):
         # Full path on hover — the label is only the file name.
         item.setToolTip(str(path))
         self.conv_file_list.addItem(item)
-        self._refresh_conv_empty()
 
     def _conv_add_folder(self, folder: Path) -> int:
         """Add supported audio/video files from a folder tree.
@@ -390,12 +418,10 @@ class AudioConverterTab(QWidget):
             if 0 <= row < len(self._conv_files):
                 self._conv_files.pop(row)
             self.conv_file_list.takeItem(row)
-        self._refresh_conv_empty()
 
     def _conv_clear_files(self) -> None:
         self._conv_files.clear()
         self.conv_file_list.clear()
-        self._refresh_conv_empty()
         self.conv_status_label.setText("File list cleared.")
 
     def _conv_browse_dir(self) -> None:
@@ -448,6 +474,7 @@ class AudioConverterTab(QWidget):
         self._conv_done   = 0
         self._conv_active = True
         self._conv_freeze_settings(True)
+        self.batch_started.emit()
         # Snapshot the shared cleanup-tag list: editing it in the Downloader
         # tab mid-batch must not change what later items in this batch do.
         self._conv_clean_tags = (
@@ -487,6 +514,8 @@ class AudioConverterTab(QWidget):
                 f"Done: {self._conv_done}/{self._conv_total} converted."
             )
             self.conv_progress.setValue(0)
+            # Window-title mark before the reset flips _conv_active off.
+            self.batch_finished.emit(self._conv_done, self._conv_total)
             self._conv_reset()
             return
 
@@ -601,6 +630,7 @@ class AudioConverterTab(QWidget):
         )
         self._mark_conv_item(self._conv_idx, "done")
         self._record_conversion(src, out_path, "")
+        self._set_last_result(Path(out_path))
         self._conv_idx  += 1
         self._conv_done += 1
         self._conv_kick_next()
@@ -646,7 +676,6 @@ class AudioConverterTab(QWidget):
     def _conv_reset(self) -> None:
         self._conv_files.clear()
         self.conv_file_list.clear()
-        self._refresh_conv_empty()
         self._conv_clean_tags = None
         self._conv_freeze_settings(False)
         self._eta_format = "%p%"

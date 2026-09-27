@@ -43,7 +43,13 @@ from .history import DownloadHistory
 from .icon import mark_status
 from .progress import EtaEstimator
 from .settings import AppSettings
-from .utils import open_in_explorer, scan_media_files, set_controls_busy
+from .utils import (
+    install_placeholder,
+    open_in_explorer,
+    open_result,
+    scan_media_files,
+    set_controls_busy,
+)
 from .worker_tracking import WorkerTracker
 
 log = logging.getLogger(__name__)
@@ -55,6 +61,10 @@ class VideoConvertTab(QWidget):
     #: Emitted after a conversion outcome lands in the shared history, so
     #: MainWindow can refresh the History tab (same pattern as DownloadTab).
     history_changed = Signal()
+    #: Emitted when a batch starts / finishes so MainWindow can mark the
+    #: window title (same contract as DownloadTab).
+    batch_started = Signal()
+    batch_finished = Signal(int, int)  # done, total
 
     def __init__(self, settings: AppSettings,
                  tags_provider: Callable[[], str],
@@ -75,6 +85,8 @@ class VideoConvertTab(QWidget):
         self._video_conv_clean_tags: list[str] | None = None  # snapshotted
         self._eta = EtaEstimator()
         self._eta_format = "%p%"
+        #: Last converted file — what "Open last result" opens.
+        self._last_result: Path | None = None
         self._build_ui()
 
     # ------------------------------------------------------------------ #
@@ -117,15 +129,12 @@ class VideoConvertTab(QWidget):
         )
         root.addWidget(self.video_conv_file_list, 1)
 
-        # Empty-state placeholder (mirrors the History tab)
-        self._video_conv_empty = QLabel(
-            "No videos yet.\nAdd videos or a folder to get started."
+        # Empty-state placeholder rendered *inside* the list box (P2) —
+        # the old label sat below it as a separate row.
+        self._video_conv_empty = install_placeholder(
+            self.video_conv_file_list,
+            "No videos yet.\nAdd videos or a folder to get started.",
         )
-        self._video_conv_empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._video_conv_empty.setStyleSheet(
-            "color: palette(text); font-size: 9pt; padding: 40px;"
-        )
-        root.addWidget(self._video_conv_empty)
 
         fbtn_row = QHBoxLayout()
         self.video_conv_add_files_btn = QPushButton("Files")
@@ -203,6 +212,15 @@ class VideoConvertTab(QWidget):
         self.video_conv_cancel_btn.setEnabled(False)
         btn_row.addWidget(self.video_conv_start_btn)
         btn_row.addWidget(self.video_conv_cancel_btn)
+        btn_row.addStretch()
+        # "Done → name" was unactionable (P2): this opens the file.
+        self.open_last_btn = QPushButton("Open last result")
+        self.open_last_btn.setEnabled(False)
+        self.open_last_btn.setToolTip(
+            "Open the last converted file with your default app."
+        )
+        self.open_last_btn.clicked.connect(self._open_last_result)
+        btn_row.addWidget(self.open_last_btn)
         root.addLayout(btn_row)
 
         self.video_conv_progress = QProgressBar()
@@ -229,10 +247,6 @@ class VideoConvertTab(QWidget):
     #  File list helpers                                                   #
     # ------------------------------------------------------------------ #
 
-    def _refresh_video_conv_empty(self) -> None:
-        """Show the empty-state placeholder iff the video list has no rows."""
-        self._video_conv_empty.setVisible(self.video_conv_file_list.count() == 0)
-
     def _mark_video_conv_item(self, row: int, status: str,
                               tooltip: str = "") -> None:
         """Give a video row its batch status (icon + color + tooltip).
@@ -241,6 +255,21 @@ class VideoConvertTab(QWidget):
         icon.mark_status(), so all three read identically.
         """
         mark_status(self.video_conv_file_list.item(row), status, tooltip)
+
+    def _set_last_result(self, path: Path) -> None:
+        """Publish the file that just converted to the Open button."""
+        self._last_result = path
+        self.open_last_btn.setEnabled(True)
+        self.open_last_btn.setToolTip(f"Open last result: {path}")
+
+    def _open_last_result(self) -> None:
+        """Open the last converted file (P2: "Done → name" was read-only)."""
+        if self._last_result is None:
+            return
+        if not open_result(self._last_result):
+            self.video_conv_status_label.setText(
+                f"Result not found: {self._last_result}"
+            )
 
     def _video_conv_add_file(self, path: Path) -> None:
         if path in self._video_conv_files:
@@ -256,7 +285,6 @@ class VideoConvertTab(QWidget):
         # Full path on hover — the label is only the file name.
         item.setToolTip(str(path))
         self.video_conv_file_list.addItem(item)
-        self._refresh_video_conv_empty()
 
     def _video_conv_add_folder(self, folder: Path) -> int:
         """Queue supported video files under a folder (bounded walk).
@@ -304,12 +332,10 @@ class VideoConvertTab(QWidget):
             if 0 <= row < len(self._video_conv_files):
                 self._video_conv_files.pop(row)
             self.video_conv_file_list.takeItem(row)
-        self._refresh_video_conv_empty()
 
     def _video_conv_clear_files(self) -> None:
         self._video_conv_files.clear()
         self.video_conv_file_list.clear()
-        self._refresh_video_conv_empty()
         self.video_conv_status_label.setText("File list cleared.")
 
     def _video_conv_browse_dir(self) -> None:
@@ -340,6 +366,7 @@ class VideoConvertTab(QWidget):
         self._video_conv_done = 0
         self._video_conv_active = True
         self._video_conv_freeze_settings(True)
+        self.batch_started.emit()
         # Snapshot the shared cleanup-tag list (see the audio tab's note).
         self._video_conv_clean_tags = (
             parse_tag_list(self._tags_provider())
@@ -376,6 +403,9 @@ class VideoConvertTab(QWidget):
                 f"Done: {self._video_conv_done}/{self._video_conv_total} converted."
             )
             self.video_conv_progress.setValue(0)
+            # Window-title mark before the reset flips _video_conv_active off.
+            self.batch_finished.emit(self._video_conv_done,
+                                      self._video_conv_total)
             self._video_conv_reset()
             return
 
@@ -470,6 +500,7 @@ class VideoConvertTab(QWidget):
         )
         self._mark_video_conv_item(self._video_conv_idx, "done")
         self._record_conversion(src, out_path, "")
+        self._set_last_result(Path(out_path))
         self._video_conv_idx += 1
         self._video_conv_done += 1
         self._video_conv_kick_next()
@@ -516,7 +547,6 @@ class VideoConvertTab(QWidget):
     def _video_conv_reset(self) -> None:
         self._video_conv_files.clear()
         self.video_conv_file_list.clear()
-        self._refresh_video_conv_empty()
         self._video_conv_clean_tags = None
         self._video_conv_freeze_settings(False)
         self._eta_format = "%p%"

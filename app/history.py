@@ -138,3 +138,18 @@ class DownloadHistory:
         """Remove all entries and persist the empty list."""
         self.entries.clear()
         self.save()
+
+    def remove_at(self, index: int) -> bool:
+        """Remove a single entry by position and persist.
+
+        The History tab previously could only Clear *All*; removing one row
+        needs a model-side counterpart. Bounds-checked on purpose: the row
+        index comes from a filtered view, and a stale index must be a no-op
+        (never an IndexError escaping into a Qt slot, never a half-written
+        file). Returns True when an entry was actually removed.
+        """
+        if not 0 <= index < len(self.entries):
+            return False
+        del self.entries[index]
+        self.save()
+        return True

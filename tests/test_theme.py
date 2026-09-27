@@ -18,7 +18,13 @@ import re
 
 from PySide6.QtGui import QColor, QPalette
 
-from app.theme import _blend, widget_stylesheet
+from app.theme import (
+    _blend,
+    contrast_ratio,
+    muted_color,
+    widget_stylesheet,
+    with_aa_placeholder,
+)
 
 # --- Palette fixtures ------------------------------------------------------
 
@@ -202,3 +208,137 @@ class TestEnabledButtonsStillRender:
         css = _stylesheet(LIGHT)
         body = rule(css, "QPushButton#primaryButton")
         assert declaration(body, "background-color") == LIGHT["highlight"]
+
+
+class TestMutedColor:
+    """P2: secondary text (search placeholder, About credit/GitHub links)
+    must clear WCAG AA while still reading as secondary."""
+
+    def test_search_placeholder_clears_aa_on_the_field(self):
+        for colors in (LIGHT, DARK):
+            muted = muted_color(colors["text"], colors["base"])
+            ratio = contrast(muted, colors["base"])
+            assert ratio >= 4.5, (
+                f"placeholder contrast {ratio:.2f}:1 ({muted} on "
+                f"{colors['base']}) must reach 4.5:1 — the audit measured "
+                f"~4.0:1"
+            )
+
+    def test_about_links_clear_aa_on_the_window(self):
+        for colors in (LIGHT, DARK):
+            muted = muted_color(colors["window_text"], colors["window"])
+            ratio = contrast(muted, colors["window"])
+            assert ratio >= 4.5, (
+                f"About link contrast {ratio:.2f}:1 ({muted} on "
+                f"{colors['window']}) must reach 4.5:1 — the audit measured "
+                f"~2.8:1 in light mode"
+            )
+
+    def test_result_is_muted_but_not_the_full_text_color(self):
+        for colors in (LIGHT, DARK):
+            muted = muted_color(colors["text"], colors["base"])
+            assert muted != colors["text"], (
+                "muted_color must step back from full-strength text"
+            )
+            # …yet stay strictly stronger than the raw foreground alone would
+            # not be: it is a blend, so it must sit between the two endpoints.
+            assert (
+                min(luminance(colors["text"]), luminance(colors["base"]))
+                <= luminance(muted)
+                <= max(luminance(colors["text"]), luminance(colors["base"]))
+            )
+
+    def test_unreachable_ratio_falls_back_to_full_strength(self):
+        # Degenerate case: when even fg-on-bg fails AA, the only honest
+        # answer is the strongest color available (never a dimmer one).
+        assert muted_color("#777777", "#777777", min_ratio=4.5) == "#777777"
+
+    def test_contrast_ratio_matches_the_reference_implementation(self):
+        # theme.contrast_ratio is the production copy; tests/test_theme has
+        # kept an independent WCAG implementation since the P1 work.
+        for a, b in ((LIGHT["text"], LIGHT["base"]),
+                     (DARK["window_text"], DARK["window"]),
+                     ("#ffffff", "#000000")):
+            assert contrast_ratio(a, b) == contrast(a, b)
+
+
+class TestPlaceholderPalette:
+    """QLineEdit draws its placeholder from the palette's PlaceholderText
+    role (stylesheets have no placeholder pseudo-element), so the AA fix has
+    to go through the palette — and touch *only* that role."""
+
+    def test_placeholder_role_clears_aa_in_both_palettes(self):
+        for colors in (LIGHT, DARK):
+            pal = with_aa_placeholder(_palette(colors))
+            got = pal.color(QPalette.ColorRole.PlaceholderText).name()
+            ratio = contrast(got, colors["base"])
+            assert ratio >= 4.5, (
+                f"PlaceholderText {got} reaches only {ratio:.2f}:1 against "
+                f"the field background {colors['base']}"
+            )
+
+    def test_every_other_role_is_left_alone(self):
+        pal = with_aa_placeholder(_palette(LIGHT))
+        for key, role in _ROLE_OF.items():
+            assert pal.color(QPalette.ColorGroup.Active, role).name() == \
+                QColor(LIGHT[key]).name(), f"role {key} must not change"
+
+
+class TestFrozenControlsLookDisabled:
+    """The QSS `color:` on fields/checkboxes/radios beat the palette's
+    disabled text, so a control frozen by a batch rendered at full strength
+    and still read as editable (caught by the P2 screenshot review)."""
+
+    # selector, live-text palette role, the background it sits on
+    CASES = (
+        ("QLineEdit:disabled", "text", "base"),
+        ("QComboBox:disabled", "text", "base"),
+        ("QSpinBox:disabled", "text", "base"),
+        ("QDoubleSpinBox:disabled", "text", "base"),
+        ("QCheckBox:disabled", "window_text", "window"),
+        ("QRadioButton:disabled", "window_text", "window"),
+    )
+
+    def test_disabled_text_is_muted_but_still_aa_readable(self):
+        for colors in (LIGHT, DARK):
+            css = _stylesheet(colors)
+            for sel, live_key, bg_key in self.CASES:
+                got = declaration(rule(css, sel), "color")
+                assert got != colors[live_key], (
+                    f"{sel} still renders at the live text color — a frozen "
+                    f"control would look enabled"
+                )
+                ratio = contrast(got, colors[bg_key])
+                assert ratio >= 4.5, (
+                    f"{sel} text {got} reaches only {ratio:.2f}:1 on "
+                    f"{bg_key} {colors[bg_key]} (WCAG AA is 4.5)"
+                )
+
+
+class TestRadioIndicator:
+    """Light-mode regression from the P2 screenshot review: the Windows style
+    painted *no* indicator for the checked radio (only the unchecked circles
+    showed), so the selected mode/normalization was invisible."""
+
+    def test_checked_indicator_uses_the_accent(self):
+        for colors in (LIGHT, DARK):
+            css = _stylesheet(colors)
+            body = rule(css, "QRadioButton::indicator")
+            assert "border-radius" in body, "the indicator must be drawn"
+            normal_bg = declaration(body, "background")
+            checked_bg = declaration(
+                rule(css, "QRadioButton::indicator:checked"), "background"
+            )
+            assert checked_bg == colors["highlight"], (
+                f"the checked dot must fill with the accent, got {checked_bg}"
+            )
+            assert checked_bg != normal_bg, "checked must differ from unchecked"
+
+    def test_disabled_checked_indicator_dims_to_mid(self):
+        for colors in (LIGHT, DARK):
+            dim = declaration(
+                rule(_stylesheet(colors),
+                     "QRadioButton:disabled::indicator:checked"),
+                "background",
+            )
+            assert dim == colors["mid"]

@@ -155,7 +155,96 @@ All notable changes to this project are documented here.
   way, and `mark_status()` appends a failure message instead of overwriting the
   tooltip that was already there.
 
+- **Secondary text below WCAG AA (search placeholder 4.00:1, About links
+  2.82:1)**
+  Stylesheets have no placeholder pseudo-element, so `QLineEdit` draws its
+  placeholder from the palette's `PlaceholderText` role — the raw system value
+  measures 4.00:1 on the field, and the About dialog's credit/GitHub links used
+  `NEUTRAL_GRAY` on the window (2.82:1 in light mode). Both now come from
+  `theme.muted_color()` (blends the foreground toward the background until it
+  clears 4.5:1): 4.74:1 / 4.66:1 light, 4.73:1 / 4.92:1 dark, verified by pixel
+  measurement in both palettes. Qt keeps an **explicit palette snapshot on every
+  widget** (a window-level `setPalette()` never reaches the edits — measured),
+  so the role is also written to all three color groups on every
+  QLineEdit/QTextEdit/QPlainTextEdit under the window, re-applied on system
+  theme changes, and the About links use the window palette instead of a hard
+  coded gray.
+
+- **The selected radio button had no visible indicator (light mode)**
+  The Windows style painted the *checked* radio's dot in the background
+  color (or not at all) while unchecked circles rendered normally — the
+  selected CBR/VBR mode and normalization were simply invisible, which the
+  dark/Fusion build never showed. The indicator is now drawn explicitly by
+  the stylesheet (`QRadioButton::indicator*`): accent-filled when checked,
+  `{mid}`-bordered `{base}` circle when not, dimmed when disabled.
+
+- **Frozen checkboxes and combos still looked enabled**
+  The stylesheet sets an unconditional `color:` on fields, checkboxes and
+  radios, which beats the palette's disabled text — a control frozen by a
+  batch greyed out its *buttons* but kept full-strength text everywhere
+  else, so the panel read as half-editable. New `:disabled` rules mute that
+  text with the P1-style 45% blend (`{disabled_field}`: ≥4.5:1 on both the
+  field and widget surfaces in both palettes).
+
+- **The progress bar and status line were below the fold at the default
+  size**
+  `MainWindow` opened 900×620 but the Downloader tab's content is ~605 px
+  tall, leaving its QProgressBar and status label 65 px outside the
+  viewport — the batch's only progress/ETA readout (and every error message)
+  required scrolling. The default is now 900×700 so all four tabs fit.
+
+- **The History summary counted rows the filter had hidden**
+  With 1 of 2 entries visible it still reported "(2 items, …)" — and could
+  quote a total size that included hidden files. The summary now describes what
+  is on screen: "(1 of 2 items, 12.3 MB shown)".
+
+- **The Downloader's settings stayed editable while a batch ran**
+  Both converter tabs froze theirs, but resolution, container, checkboxes,
+  folder and cleanup-tag inputs could all be changed mid-run — changes the
+  batch had already snapshotted and would never apply. `_set_batch_busy()`
+  now freezes queue + settings (with the busy tooltip) and, on thaw, restores
+  each control's *previous* enabled state instead of force-enabling it (the
+  bitrate combo stays off in video mode, the tag field with Clean title off).
+
+### Added
+
+- **Empty states inside the list boxes**
+  The Downloader's queue had no hint at all (just a blank box), and the
+  converter/history placeholders sat *below* their list where they read as
+  unrelated captions. Each list now carries a centered placeholder inside its
+  own viewport (`install_placeholder()`, model-signal driven so it survives
+  `addItem`/`clear`/filtered re-renders), and the Downloader invites
+  "Paste or drop URLs here (Ctrl+V)".
+
+- **A batch finishing now announces itself**
+  Title goes to "✓ Done (3/5) — Chrisnov Media Toolkit …" plus a taskbar
+  flash (`QApplication.alert`) on `batch_finished`, cleared when the next
+  batch starts — previously a finished batch left no trace on screen.
+
+- **"Open last result" on all three tabs**
+  One click reopens the finished file (or its folder) in the default app /
+  file manager; it arms on success and is disabled again until the next
+  result, so a vanished file can never become its target.
+
+- **Deleting a single History entry**
+  "Clear All" was the only way to remove anything. Each row can now be removed
+  with a Remove button or the Delete key: rows carry their **model index**
+  (`DownloadHistory.remove_at()` is bounds-checked, and `item.data()` returns a
+  dict *copy*, so identity matching could not work), making removal safe from
+  a filtered view and a stale selection a silent no-op.
+
 ### Changed
+
+- **Download progress shows where you are in the queue and when it ends**
+  The bar used to be a bare percent (identical for item 1 and item 5 of 5);
+  it now reads "[2/5] 50% • ETA 00:10" from the already-existing position and
+  `EtaEstimator` data, reset per batch.
+
+- **Drops answer back**
+  Dropping a URL on the History tab queues it *and* switches to the Downloader
+  (it used to queue silently behind the wrong tab); plain text or an
+  unsupported file on a converter tab reports "not text" / "Nothing added —
+  drop video files or a folder." instead of doing nothing visible.
 
 - **History polish** - the empty state distinguishes an empty history
   ("No downloads yet") from a filter that hides everything ("No matching
@@ -175,7 +264,7 @@ All notable changes to this project are documented here.
   release `.sha256` files now carry `hash  filename` like the Linux/macOS
   ones, so `sha256sum -c` accepts them.
 
-- **Tests** - the suite grew from 171 to 220 (`tests/test_theme.py`,
+- **Tests** - the suite grew from 171 to 240 (`tests/test_theme.py`,
   `tests/test_utils.py` and `tests/test_main_excepthook.py` are new), with
   regression coverage for every
   fix above, exact-value assertions where checks were vacuous, and skip guards

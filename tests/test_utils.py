@@ -3,7 +3,14 @@
 from pathlib import Path
 from types import SimpleNamespace
 
-from app.utils import clip_text, open_in_explorer, scan_media_files
+from app.utils import (
+    BATCH_BUSY_HINT,
+    clip_text,
+    open_in_explorer,
+    open_result,
+    scan_media_files,
+    set_controls_busy,
+)
 
 
 class TestOpenInExplorer:
@@ -113,3 +120,95 @@ class TestClipText:
 
     def test_tiny_limits_degrade_to_the_ellipsis_only(self):
         assert clip_text("abcdef", 1) == "…"
+
+
+class _StubWidget:
+    """Duck-typed QWidget for set_controls_busy(): only the four methods the
+    helper touches, so the freeze contract is unit-testable without a
+    QApplication (pytest must not create one — see tests/test_main_excepthook)."""
+
+    def __init__(self, tooltip: str = "", enabled: bool = True) -> None:
+        self._tip = tooltip
+        self._enabled = enabled
+
+    def toolTip(self) -> str:
+        return self._tip
+
+    def setToolTip(self, text: str) -> None:
+        self._tip = text
+
+    def isEnabled(self) -> bool:
+        return self._enabled
+
+    def setEnabled(self, on: bool) -> None:
+        self._enabled = on
+
+
+class TestSetControlsBusy:
+    """A batch freezes the Downloader's *settings* too (P2), and thawing must
+    restore whatever state each control was in — not blindly re-enable it."""
+
+    def test_freeze_disables_and_self_explains(self):
+        w = _StubWidget(tooltip="Pick a resolution")
+        set_controls_busy([w], True)
+        assert w.isEnabled() is False
+        assert w.toolTip() == BATCH_BUSY_HINT
+
+    def test_thaw_restores_tooltip_and_enabled_state(self):
+        w = _StubWidget(tooltip="Pick a resolution")
+        set_controls_busy([w], True)
+        set_controls_busy([w], False)
+        assert w.isEnabled() is True
+        assert w.toolTip() == "Pick a resolution"
+
+    def test_thaw_keeps_a_control_that_was_already_off(self):
+        # bitrate in video mode / the cleanup-tag field with Clean title off
+        w = _StubWidget(tooltip="Bitrate", enabled=False)
+        set_controls_busy([w], True)
+        assert w.isEnabled() is False
+        set_controls_busy([w], False)
+        assert w.isEnabled() is False, "thaw must not switch a control on"
+        assert w.toolTip() == "Bitrate"
+
+    def test_double_freeze_keeps_the_original_state(self):
+        # The second freeze must not capture the frozen state as "original".
+        w = _StubWidget(tooltip="Browse")
+        set_controls_busy([w], True)
+        w.setEnabled(True)  # something re-enabled it behind our back
+        set_controls_busy([w], True)
+        set_controls_busy([w], False)
+        set_controls_busy([w], False)
+        assert w.isEnabled() is True
+        assert w.toolTip() == "Browse"
+
+    def test_thaw_without_a_prior_freeze_is_a_noop(self):
+        w = _StubWidget(tooltip="Skip duplicates")
+        set_controls_busy([w], False)
+        assert w.isEnabled() is True
+        assert w.toolTip() == "Skip duplicates"
+
+
+class TestOpenResult:
+    """'Open last result' (P2) — files open with the default app, folders in
+    the file manager, and a vanished/empty path opens nothing at all."""
+
+    @staticmethod
+    def _capture(monkeypatch) -> list:
+        calls: list = []
+        fake = SimpleNamespace(openUrl=lambda url: calls.append(url) or True)
+        monkeypatch.setattr("app.utils.QDesktopServices", fake)
+        return calls
+
+    def test_opens_a_finished_file_and_its_folder(self, tmp_path, monkeypatch):
+        calls = self._capture(monkeypatch)
+        out = tmp_path / "converted.mp3"
+        out.write_bytes(b"x")
+        assert open_result(out) is True
+        assert open_result(tmp_path) is True
+        assert [Path(c.toLocalFile()) for c in calls] == [out, tmp_path]
+
+    def test_ignores_missing_and_empty_paths(self, tmp_path, monkeypatch):
+        calls = self._capture(monkeypatch)
+        assert open_result(tmp_path / "vanished.mp3") is False
+        assert open_result("") is False
+        assert calls == []

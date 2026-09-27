@@ -24,6 +24,7 @@ Exit code 0 with "SMOKE OK" on success; prints "FAIL: <what>" and exits 1
 on the first failed check.
 """
 
+import json
 import logging
 import os
 import shutil
@@ -181,16 +182,45 @@ def main() -> None:
     ]
     check(not missing_icons, f"tabs without a rendered icon: {missing_icons}")
 
+    # The default size must fit the Downloader's batch feedback: at the old
+    # 900x620 the progress bar + status line sat 65 px below the fold, so
+    # the batch's only progress readout required scrolling to see.
+    check(w.height() >= 700,
+          f"default window height {w.height()} must fit progress bar + status")
+
     dl = getattr(w, "download_tab", None) or w
     conv = getattr(w, "audio_tab", None) or w
     vid = getattr(w, "video_tab", None) or w
     hist = getattr(w, "history_tab", None) or w
+
+    # --- Empty states live inside the list box (P2) --------------------------
+    # They used to be labels stacked *below* the list, so the queue itself
+    # looked broken when empty (the Downloader had no hint at all).
+    for lst, ph, name in (
+        (dl.queue_list, getattr(dl, "queue_placeholder", None), "downloader"),
+        (conv.conv_file_list, conv._conv_empty, "audio converter"),
+        (vid.video_conv_file_list, vid._video_conv_empty, "video converter"),
+        (hist._history_list, hist._history_empty, "history"),
+    ):
+        check(ph is not None and ph.parent() is lst.viewport(),
+              f"{name} placeholder must render inside the list box")
+        check(not ph.isHidden(),
+              f"{name} placeholder should start visible")
+    check("Paste or drop URLs here" in dl.queue_placeholder.text(),
+          f"the Downloader hint should invite a paste/drop, got "
+          f"{dl.queue_placeholder.text()!r}")
+    check(not dl.open_last_btn.isEnabled()
+          and not conv.open_last_btn.isEnabled()
+          and not vid.open_last_btn.isEnabled(),
+          "'Open last result' starts disabled until something finishes")
 
     # --- Downloader queue --------------------------------------------------
     n0 = dl.queue_list.count()
     ok = add_url(dl, "https://www.youtube.com/watch?v=abc123")
     check(ok is True, "add_url(watch?v=) should return True")
     check(dl.queue_list.count() == n0 + 1, "watch URL should be queued")
+    check(dl.queue_placeholder.isHidden(),
+          "the queue placeholder must hide once a URL is queued")
     check(dl.queue_list.item(n0).text() == "[abc123]",
           f"watch label should be [abc123], got {dl.queue_list.item(n0).text()!r}")
     check("Playlist detected" not in dl.status_label.text(),
@@ -215,6 +245,8 @@ def main() -> None:
 
     dl._clear_queue()
     check(dl.queue_list.count() == 0, "clear should empty the queue")
+    check(not dl.queue_placeholder.isHidden(),
+          "the queue placeholder must come back when the queue empties")
 
     # --- Clipped rows keep the full target on hover (P1) ---------------------
     # The old code sliced identifiers mid-word with no ellipsis and threw the
@@ -289,6 +321,19 @@ def main() -> None:
     pump()
     check(hist._history_list.count() == 2, "cleared search should restore rows")
     check(hist._history_empty.isHidden(), "empty placeholder should hide again")
+
+    # The summary describes what is on screen (P2): it used to count and
+    # size every entry even while a filter hid most of them.
+    hist._history_search.setText("a.mp3")
+    pump()
+    check("1 of 2" in hist._history_summary.text(),
+          f"filtered summary should say '1 of 2', got "
+          f"{hist._history_summary.text()!r}")
+    hist._history_search.setText("")
+    pump()
+    check("2 items" in hist._history_summary.text(),
+          f"unfiltered summary should count all 2, got "
+          f"{hist._history_summary.text()!r}")
 
     # --- Converter file lists ----------------------------------------------
     # Empty-state placeholder: visible while the list is empty, hidden
@@ -392,6 +437,42 @@ def main() -> None:
           and dl.download_btn.toolTip() == orig_dl_tip,
           "unfreezing Start must restore its tooltip and enabled state")
 
+    # The Downloader freezes its settings too (P2): the batch snapshots every
+    # setting below at start, so editing one mid-run could never apply — yet
+    # they all stayed clickable while the converter tabs froze theirs.
+    dl._set_batch_busy(True)
+    for wdg_name in ("res_combo", "container_combo", "audio_only_chk",
+                     "clean_chk", "skip_dup_chk", "dir_input", "browse_btn",
+                     "info_btn", "clean_tags_input"):
+        check(not getattr(dl, wdg_name).isEnabled(),
+              f"dl.{wdg_name} must be frozen while the batch runs")
+    check(dl.res_combo.toolTip() == BATCH_BUSY_HINT,
+          "frozen settings should carry the busy tooltip")
+    dl._set_batch_busy(False)
+    check(dl.res_combo.isEnabled() and dl.container_combo.isEnabled(),
+          "downloader settings must thaw after the batch")
+    check(not dl.bitrate_combo.isEnabled(),
+          "thawing must restore a control that was already off (video mode)")
+    check(dl.res_combo.toolTip() != BATCH_BUSY_HINT,
+          "the busy tooltip must be swapped back out on thaw")
+
+    # --- Download progress shows position + ETA (P2) ---------------------------
+    # The bar used to be a bare percent; speed/ETA data was already there.
+    from app.progress import EtaEstimator
+
+    clock = iter([0.0, 10.0])
+    dl._eta = EtaEstimator(clock=lambda: next(clock, 10.0))
+    dl._eta_label = "[2/5] %p%"
+    dl._eta.reset(0, 100)
+    dl._on_dl_progress(50)
+    check(dl.dl_progress.value() == 50, "progress hook should drive the bar")
+    check(dl.dl_progress.format() == "[2/5] %p% • ETA 00:10",
+          f"download bar should show position + ETA, got "
+          f"{dl.dl_progress.format()!r}")
+    dl._eta_label = "%p%"
+    dl._eta = EtaEstimator()
+    dl.dl_progress.setFormat("%p%")
+
     vid._video_conv_add_file(Path("/cmt-smoke/freeze.mp4"))
     vid.video_conv_dir_input.setText(_TMP_HOME)
     orig_vkick = vid._video_conv_kick_next
@@ -484,6 +565,57 @@ def main() -> None:
           f"url_input should hold re-queued url, got {dl.url_input.text()!r}")
     check(dl.queue_list.count() == 1, "re-queued URL should land in the queue")
 
+    # --- History: remove a single entry (P2) ---------------------------------
+    # Clear All was the only way to delete; one row needs model + UI support.
+    # Removal must also work from a *filtered* view: the visible row (1 of 2)
+    # is model index 1, and item.data() hands back a dict copy — so the row
+    # has to carry its model index explicitly.
+    hist._history_search.setText("a.mp3")
+    pump()
+    check(hist._history_list.count() == 1, "filter should narrow to 1 row")
+    hist._history_list.setCurrentRow(0)
+    check(hist._history_remove_btn.isEnabled(),
+          "Remove should enable once a row is selected")
+    n_entries = len(w.history.entries)
+    removed_name = w.history.entries[1]["filename"]
+    hist._on_history_remove()
+    check(len(w.history.entries) == n_entries - 1,
+          "removing should drop exactly one entry")
+    check(removed_name not in [e["filename"] for e in w.history.entries],
+          f"the entry behind the filtered row ({removed_name}) must be the "
+          f"one removed")
+    check(hist._history_list.count() == 0,
+          "the removed row must vanish from the active filter")
+    hist._history_search.setText("")
+    pump()
+    check(hist._history_list.count() == len(w.history.entries),
+          "the list must re-render after a removal")
+    check(not hist._history_remove_btn.isEnabled(),
+          "Remove should disable again without a selection")
+    on_disk = json.loads(w.history.path.read_text(encoding="utf-8"))
+    check(len(on_disk["items"]) == n_entries - 1,
+          "the removal must be persisted to disk")
+    check(w.history.remove_at(9999) is False,
+          "remove_at must bounds-check a stale row index")
+    hist._on_history_remove()  # no selection: must be a silent no-op
+
+    # Re-seed one entry so the Clear All test still has something to confirm.
+    history_append(w, url="https://example.com/c", filepath="/tmp/c.mp3",
+                   filename="c.mp3", filesize=1, type_="audio",
+                   container="mp3", audio_only=True, status="completed")
+    history_render(hist, w)
+    check(hist._history_list.count() == len(w.history.entries),
+          "the re-seeded entries should render")
+
+    # --- A finished batch marks the window title (P2) ------------------------
+    # There was no completion signal anywhere: no tray, no flash, no title.
+    dl.batch_finished.emit(3, 5)
+    check("✓ Done (3/5)" in w.windowTitle(),
+          f"a finished batch should mark the title, got {w.windowTitle()!r}")
+    dl.batch_started.emit()
+    check(w.windowTitle() == w._base_title,
+          f"a new batch should clear the marker, got {w.windowTitle()!r}")
+
     # --- History clear ---------------------------------------------------------
     hist._on_history_clear()
     check(any(
@@ -513,6 +645,11 @@ def main() -> None:
           "the completed entry should point at the output file")
     check(entry.get("type") == "audio",
           f"the conversion entry should be typed audio, got {entry.get('type')!r}")
+    check(conv.open_last_btn.isEnabled(),
+          "a finished conversion must arm 'Open last result'")
+    check(conv._last_result == out_file,
+          f"'Open last result' should point at the output file, got "
+          f"{conv._last_result!r}")
 
     conv._conv_queue = [Path(_TMP_HOME) / "broken.wav"]
     conv._conv_files = [conv._conv_queue[0]]
@@ -543,6 +680,8 @@ def main() -> None:
     check(entry.get("type") == "video" and entry.get("status") == "completed",
           f"video conversion should record as completed/video, got "
           f"{entry.get('type')!r}/{entry.get('status')!r}")
+    check(vid.open_last_btn.isEnabled() and vid._last_result == vout,
+          "a finished video conversion must arm 'Open last result'")
 
     history_render(hist, w)
     check(hist._history_list.count() == 3,
@@ -722,6 +861,8 @@ def main() -> None:
     check(bool(entry.get("error")), "the failed entry should say what went wrong")
     check(vanished.done == 0, "a missing file must not count as completed")
     check(vanished.idx == 1, "the batch must still advance past the missing file")
+    check(dl._last_result is None,
+          "a vanished file must never become the 'Open last result' target")
     check(dl._batch is None, "single-item batch should reset after the miss")
     # The per-item message is intentionally replaced by the batch summary —
     # which itself proves the miss was not counted as a completion.
@@ -779,6 +920,46 @@ def main() -> None:
     check(dl.queue_list.count() == 2,
           f"both dropped files must be queued, got {dl.queue_list.count()}")
     dl._clear_queue()
+
+    # --- Drop feedback: answer the user, show where things went (P2) ----------
+    # A URL dropped on the History tab used to queue silently on a tab the
+    # user could not see.
+    w._tabs.setCurrentIndex(3)
+    md_hist = QMimeData()
+    md_hist.setText("https://example.com/from-history-drop")
+    w.dropEvent(QDropEvent(QPointF(12, 12), QtCoreQt.DropAction.CopyAction,
+                           md_hist, QtCoreQt.MouseButton.LeftButton,
+                           QtCoreQt.KeyboardModifier.NoModifier))
+    check(w._tabs.currentIndex() == 0,
+          "a URL dropped on History must switch to the Downloader tab")
+    check(dl.queue_list.count() == 1,
+          f"the dropped URL must be queued, got {dl.queue_list.count()}")
+    check("Added 1 URL" in dl.status_label.text(),
+          f"the drop should report what was added, got {dl.status_label.text()!r}")
+    dl._clear_queue()
+
+    # Plain text dropped on a converter tab used to be ignored with no word.
+    w._tabs.setCurrentIndex(1)
+    md_text = QMimeData()
+    md_text.setText("just some prose")
+    w.dropEvent(QDropEvent(QPointF(12, 12), QtCoreQt.DropAction.CopyAction,
+                           md_text, QtCoreQt.MouseButton.LeftButton,
+                           QtCoreQt.KeyboardModifier.NoModifier))
+    check("not text" in conv.conv_status_label.text(),
+          f"text dropped on the audio converter should explain itself, got "
+          f"{conv.conv_status_label.text()!r}")
+
+    # An unsupported file (added == 0) used to be a silent no-op too.
+    w._tabs.setCurrentIndex(2)
+    md_bad = QMimeData()
+    md_bad.setUrls([QUrl.fromLocalFile(str(Path(_TMP_HOME) / "notes.txt"))])
+    w.dropEvent(QDropEvent(QPointF(12, 12), QtCoreQt.DropAction.CopyAction,
+                           md_bad, QtCoreQt.MouseButton.LeftButton,
+                           QtCoreQt.KeyboardModifier.NoModifier))
+    check("Nothing added" in vid.video_conv_status_label.text(),
+          f"an unsupported video drop should explain itself, got "
+          f"{vid.video_conv_status_label.text()!r}")
+    w._tabs.setCurrentIndex(0)
 
     # --- Cancel must not block the GUI or terminate the thread (HIGH) ---------
     class _StubWorker(QThread):
