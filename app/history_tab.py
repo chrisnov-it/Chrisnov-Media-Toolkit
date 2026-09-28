@@ -23,11 +23,14 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QSizePolicy,
+    QStyle,
     QVBoxLayout,
     QWidget,
 )
 
 from .history import DownloadHistory
+from .icon import queue_status_icon
+from .theme import _base_font_points, small_font_size, tiny_font_size
 from .utils import install_placeholder, open_in_explorer
 
 
@@ -66,11 +69,16 @@ class HistoryTab(QWidget):
         # Header
         header = QHBoxLayout()
         title = QLabel("History")
-        title.setStyleSheet("font-weight:600; font-size:10pt;")
+        # Sizes derive from the platform base (P3) — a hardcoded 10pt would
+        # be *smaller* than the 11pt macOS base.
+        title.setStyleSheet(
+            f"font-weight:600; font-size:{_base_font_points() + 1}pt;"
+        )
         header.addWidget(title)
         self._history_summary = QLabel("")
         self._history_summary.setStyleSheet(
-            "color: palette(text); font-size: 8pt; padding-left: 4px;"
+            f"color: palette(text); font-size: {small_font_size()};"
+            " padding-left: 4px;"
         )
         header.addWidget(self._history_summary)
         header.addStretch()
@@ -90,9 +98,11 @@ class HistoryTab(QWidget):
         filter_row = QHBoxLayout()
         self._history_search = QLineEdit()
         self._history_search.setPlaceholderText("Search by filename or URL...")
+        self._history_search.setAccessibleName("Search history")
         self._history_search.textChanged.connect(self._on_history_search_changed)
         filter_row.addWidget(self._history_search, 1)
         self._history_filter = QComboBox()
+        self._history_filter.setAccessibleName("History type filter")
         self._history_filter.addItems(["All", "Audio", "Video", "Playlist"])
         self._history_filter.currentTextChanged.connect(self._on_history_search_changed)
         filter_row.addWidget(self._history_filter)
@@ -100,6 +110,7 @@ class HistoryTab(QWidget):
 
         # Table-like list widget
         self._history_list = QListWidget()
+        self._history_list.setAccessibleName("Download history")
         self._history_list.setMinimumHeight(150)
         self._history_list.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self._history_list.setWordWrap(True)
@@ -124,10 +135,30 @@ class HistoryTab(QWidget):
         del_sc.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
         del_sc.activated.connect(self._on_history_remove)
 
-        # Legend
-        legend = QLabel("\U0001f4c2 = Open folder   \U0001f501 = Download again")
-        legend.setStyleSheet("color: palette(text); font-size: 7pt;")
-        legend.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        # Legend — icons next to their labels, not emoji (P3): 📂/🔁
+        # depended on the user's fonts (the same tofu risk that pushed the
+        # tab icons to bundled SVGs). The style's standard pixmaps are
+        # platform-rendered, so they always show up.
+        legend = QWidget()
+        legend_row = QHBoxLayout(legend)
+        legend_row.setContentsMargins(0, 0, 0, 0)
+        legend_row.setSpacing(4)
+        legend_row.addStretch()
+        for std_pixmap, text in (
+            (QStyle.StandardPixmap.SP_DirOpenIcon, "Open folder"),
+            (QStyle.StandardPixmap.SP_BrowserReload, "Download again"),
+        ):
+            glyph = QLabel()
+            glyph.setPixmap(
+                self.style().standardIcon(std_pixmap).pixmap(14, 14)
+            )
+            legend_row.addWidget(glyph)
+            legend_row.addWidget(QLabel(text))
+            legend_row.addSpacing(12)
+        legend_row.addStretch()
+        legend.setStyleSheet(
+            f"color: palette(text); font-size: {tiny_font_size()};"
+        )
         root.addWidget(legend)
 
     # ------------------------------------------------------------------ #
@@ -188,16 +219,18 @@ class HistoryTab(QWidget):
             # Human-readable size
             size_str = _fmt_size(filesize)
 
-            # Status color
+            # Status mark is an SVG icon, not ✅/❌ text: emoji render
+            # differently (or as tofu) depending on the user's fonts (P3).
+            # The status word stays in the row text, so nothing is lost.
             completed = status == "completed"
-            type_icon = {"audio": "\U0001f3b5", "video": "\U0001f3ac", "playlist": "\U0001f4cb"}
-            icon = type_icon.get(entry.get("type", ""), "\U0001f4c1")
 
             display = (
-                f"{icon}  {filename}  |  {size_str:>8s}  |  {rel:>10s}  |  "
-                f"{'✅' if completed else '❌'} {status}"
+                f"{filename}  |  {size_str:>8s}  |  {rel:>10s}  |  {status}"
             )
             item = QListWidgetItem(display)
+            item.setIcon(
+                queue_status_icon("done" if completed else "failed")
+            )
             item.setData(Qt.ItemDataRole.UserRole, entry)
             # Where this row lives in the *model*: under a search/type filter
             # the visible row number is not the model number, and item.data()

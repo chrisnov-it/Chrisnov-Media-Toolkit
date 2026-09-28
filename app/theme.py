@@ -43,18 +43,39 @@ def enable_high_dpi() -> None:
             QApplication.setAttribute(attr, True)
 
 
-def _base_font_size() -> str:
-    """Return the base font size in points, platform-adjusted.
+def _base_font_points() -> int:
+    """Base UI font size in points, platform-adjusted.
 
     macOS needs larger fonts than Linux/Windows due to different default
     DPI assumptions. The 2015 MacBook Air 13" reports 1280x800 (non-Retina)
     to the OS, so 9pt is genuinely too small there.
     """
     if sys.platform == "darwin":
-        return "11pt"
-    if sys.platform == "win32":
-        return "9pt"
-    return "9pt"  # Linux default (unchanged)
+        return 11
+    return 9  # Windows and Linux
+
+
+def _base_font_size() -> str:
+    """The base font size as a CSS length ("9pt")."""
+    return f"{_base_font_points()}pt"
+
+
+def small_font_size() -> str:
+    """Secondary text, one step below the base ("8pt" at the default size).
+
+    Placeholders, hints and captions. Derived from the base instead of a
+    hardcoded literal (P3) so the hierarchy survives a different platform
+    base — a fixed "8pt" would nearly equal the 11pt macOS base.
+    """
+    return f"{_base_font_points() - 1}pt"
+
+
+def tiny_font_size() -> str:
+    """The smallest hint text, two steps below the base ("7pt" by default).
+
+    Legends and footer links — same reasoning as small_font_size().
+    """
+    return f"{_base_font_points() - 2}pt"
 
 
 def _font_family() -> str:
@@ -257,6 +278,7 @@ def widget_stylesheet(palette: QPalette | None = None) -> str:
     disabled_field = _blend(window_text, window, 0.45)
 
     fs = _base_font_size()
+    small = small_font_size()
     ff = _font_family()
 
     # Accent color for primary/danger buttons — use highlight in dark mode
@@ -479,12 +501,12 @@ QLabel#appNameLabel {{
     color: {window_text};
 }}
 QLabel#versionLabel {{
-    font-size: 8pt;
+    font-size: {small};
     color: {mid};
     padding-top: 2px;
 }}
 QPushButton#aboutButton {{
-    font-size: 8pt;
+    font-size: {small};
     color: {window_text};
     border-color: {midlight};
     background: transparent;

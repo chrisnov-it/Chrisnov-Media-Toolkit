@@ -52,13 +52,14 @@ from .cleaner import (
 from .constants import (
     AUDIO_BITRATES,
     AUDIO_CONTAINERS,
+    CLEAR_CONFIRM_ROWS,
     CONFIG_DIR,
     PLAYLIST_CONFIRM_THRESHOLD,
     RES_PRESETS,
     VIDEO_CONTAINERS,
 )
 from .history import DownloadHistory
-from .icon import mark_status
+from .icon import bundled_icon, mark_status, palette_icon_color
 from .progress import EtaEstimator
 from .settings import AppSettings
 from .theme import _base_font_size as _font_size
@@ -194,7 +195,11 @@ class DownloadTab(QWidget):
         url_grid.addWidget(QLabel("URL:"))
         self.url_input = QLineEdit()
         self.url_input.setPlaceholderText("https://www.youtube.com/watch?v=...")
+        self.url_input.setAccessibleName("Video URL")
         self.url_input.returnPressed.connect(self._add_url_from_input)
+        # Start follows what can actually be started (P3): enabled while the
+        # queue holds URLs or a URL is typed, disabled otherwise.
+        self.url_input.textChanged.connect(lambda _t: self._sync_queue_actions())
         url_grid.addWidget(self.url_input, 1)
         self.add_queue_btn = QPushButton("Add")
         self.add_queue_btn.clicked.connect(self._add_url_from_input)
@@ -208,6 +213,7 @@ class DownloadTab(QWidget):
         # Queue + controls
         root.addWidget(QLabel("Queue:"))
         self.queue_list = QListWidget()
+        self.queue_list.setAccessibleName("Download queue")
         self.queue_list.setMinimumHeight(90)
         self.queue_list.setIconSize(QSize(14, 14))
         self.queue_list.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
@@ -277,6 +283,8 @@ class DownloadTab(QWidget):
         self.cookie_path_label = QLabel(
             self.cookie_path[:40] + "..." if len(self.cookie_path) > 40 else self.cookie_path
         )
+        # The label is clipped for layout reasons — hover shows the whole path.
+        self.cookie_path_label.setToolTip(self.cookie_path)
         self.cookie_path_label.setStyleSheet(
             "color: palette(text);" if not self.cookie_path else ""
         )
@@ -287,6 +295,13 @@ class DownloadTab(QWidget):
         # Clean tags input (shown only when clean_chk is on)
         self.clean_tags_input = QLineEdit(", ".join(DEFAULT_CLEAN_TAGS))
         self.clean_tags_input.setClearButtonEnabled(True)
+        self.clean_tags_input.setAccessibleName("Cleanup tags")
+        # The field is a long comma list scrolled to the right, so its start
+        # is cut off on screen (P3): the full list stays on hover.
+        self.clean_tags_input.setToolTip(self.clean_tags_input.text())
+        self.clean_tags_input.textChanged.connect(
+            lambda t: self.clean_tags_input.setToolTip(t)
+        )
         root.addWidget(self.clean_tags_input)
 
         # Resolution / container / bitrate — compact grid row
@@ -327,6 +342,7 @@ class DownloadTab(QWidget):
         self.dir_input = QLineEdit(
             self._settings.saved_dir("download_video", Path.home() / "Videos")
         )
+        self.dir_input.setAccessibleName("Download output folder")
         out_row.addWidget(self.dir_input, 1)
         self.browse_btn = QPushButton("Browse")
         self.browse_btn.clicked.connect(self._browse_dl)
@@ -396,6 +412,19 @@ class DownloadTab(QWidget):
         paste_sc.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
         paste_sc.activated.connect(self._paste_clipboard)
 
+        # P3 shortcuts: Ctrl+Enter starts the batch (the classic "submit"
+        # gesture), Esc cancels it. Both are guarded — the handlers run on a
+        # live signal, so Start must not fire mid-batch (it would snapshot a
+        # second batch over the running one) and Esc must not wipe an idle
+        # queue (an accidental press would discard URLs the user queued).
+        for seq in ("Ctrl+Return", "Ctrl+KeypadEnter"):
+            start_sc = QShortcut(QKeySequence(seq), self)
+            start_sc.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
+            start_sc.activated.connect(self._start_if_idle)
+        esc_sc = QShortcut(QKeySequence(Qt.Key.Key_Escape), self)
+        esc_sc.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
+        esc_sc.activated.connect(self._cancel_if_running)
+
         # Everything _start_download() snapshots into BatchState: frozen for
         # the whole batch like the converter tabs do (P2). Editing any of
         # these mid-run could never apply — the batch reads its snapshot —
@@ -409,6 +438,10 @@ class DownloadTab(QWidget):
             self.clean_tags_input, self.res_combo, self.container_combo,
             self.bitrate_combo, self.dir_input, self.browse_btn,
         )
+
+        # Initial idle state: nothing queued, so Start/Remove/Clear start
+        # disabled instead of dead-clickable (P3).
+        self._sync_queue_actions()
 
     # ------------------------------------------------------------------ #
     #  URL helpers                                                         #
@@ -435,6 +468,38 @@ class DownloadTab(QWidget):
             return
         if not open_result(self._last_result):
             self.status_label.setText(f"Result not found: {self._last_result}")
+
+    # ------------------------------------------------------------------ #
+    #  Idle-state sync + guarded shortcuts (P3)                            #
+    # ------------------------------------------------------------------ #
+
+    def _sync_queue_actions(self) -> None:
+        """Keep Start/Remove/Clear enabled exactly when they can do work.
+
+        Start used to stay clickable with an empty queue and answer with a
+        warning dialog (validate-on-click); now it is disabled until the
+        queue holds a URL or one is typed. Remove/Clear follow the queue.
+        A running batch owns these states (set_controls_busy saved them at
+        freeze), so the sync stays out while _batch is set.
+        """
+        if self._batch is not None:
+            return
+        has_urls = bool(self.current_batch)
+        can_start = has_urls or bool(self.url_input.text().strip())
+        self.download_btn.setEnabled(can_start)
+        self.remove_btn.setEnabled(has_urls)
+        self.clear_btn.setEnabled(has_urls)
+
+    def _start_if_idle(self) -> None:
+        """Ctrl+Enter: start only when no batch is running."""
+        if self._batch is None:
+            self._start_download()
+
+    def _cancel_if_running(self) -> None:
+        """Esc: cancel only a running batch — an idle press must never
+        wipe the queue (_reset_after_batch clears it)."""
+        if self._batch is not None:
+            self._cancel_download()
 
     def _add_urls_from_text(self, text: str) -> None:
         n_added = 0
@@ -475,14 +540,15 @@ class DownloadTab(QWidget):
             return True
         self.current_batch.append(url)
         host = (urlparse(url).hostname or "").lower()
-        if self._is_playlist_url(url):
+        is_playlist = self._is_playlist_url(url)
+        if is_playlist:
             # Extract identifier from list parameter (YouTube, Vimeo, etc.)
             if "list=" in url:
                 identifier = url.split("list=")[-1].split("&")[0]
                 # YouTube playlist IDs are typically 11-34 chars, Vimeo/others vary
-                display = f"\U0001f4cb {clip_text(identifier, 20)}"
+                display = clip_text(identifier, 20)
             else:
-                display = f"\U0001f4cb {clip_text(url, 30)}"
+                display = clip_text(url, 30)
         elif "v=" in url:
             vid = url.split("v=")[-1].split("&")[0]
             display = f"[{clip_text(vid, 11)}]"
@@ -500,11 +566,19 @@ class DownloadTab(QWidget):
         # hover shows exactly what will be downloaded.
         item = QListWidgetItem(display)
         item.setToolTip(url)
+        if is_playlist:
+            # Icon, not a 📋 text glyph: glyphs render differently (or as
+            # tofu) depending on the user's fonts — see icon.py. The batch
+            # later replaces it with the row's status icon.
+            item.setIcon(
+                bundled_icon("clipboard", palette_icon_color(self.palette()))
+            )
         self.queue_list.addItem(item)
-        if self._is_playlist_url(url):
+        if is_playlist:
             self.status_label.setText(
                 "Playlist detected. Will fetch all entries on Start (size confirmation if >50)."
             )
+        self._sync_queue_actions()
         return True
 
     def _add_url_from_input(self) -> None:
@@ -536,11 +610,26 @@ class DownloadTab(QWidget):
             if 0 <= row < len(self.current_batch):
                 self.current_batch.pop(row)
             self.queue_list.takeItem(row)
+        self._sync_queue_actions()
         self.status_label.setText(f"Queue: {len(self.current_batch)} URL(s).")
 
     def _clear_queue(self) -> None:
+        # Confirm once the queue is big enough to hurt to rebuild (P3) —
+        # Clear All history already asked, but a full playlist queue was
+        # wiped by a single misclick with no way back.
+        n = len(self.current_batch)
+        if n >= CLEAR_CONFIRM_ROWS:
+            ans = QMessageBox.question(
+                self, "Clear queue",
+                f"Remove all {n} URL(s) from the queue?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if ans != QMessageBox.StandardButton.Yes:
+                return
         self.current_batch.clear()
         self.queue_list.clear()
+        self._sync_queue_actions()
         self.status_label.setText("Queue cleared.")
 
     def _browse_dl(self) -> None:
@@ -607,6 +696,8 @@ class DownloadTab(QWidget):
                 self.cookie_path_label.setText(d[:40] + "...")
             else:
                 self.cookie_path_label.setText(d)
+            # The label clips long paths — hover must show the chosen one.
+            self.cookie_path_label.setToolTip(d)
             self.cookie_path_label.setStyleSheet("")
 
     # ------------------------------------------------------------------ #
@@ -630,9 +721,10 @@ class DownloadTab(QWidget):
             )
             return
 
+        # Keep the button's label and Start untouched (P3): the old "..."
+        # text left no word on screen, and Start can safely cancel the
+        # in-flight fetch (_start_download cancels it before the batch).
         self.info_btn.setEnabled(False)
-        self.info_btn.setText("...")
-        self.download_btn.setEnabled(False)
         self.status_label.setText("Fetching info...")
 
         audio = self.audio_only_chk.isChecked()
@@ -655,11 +747,9 @@ class DownloadTab(QWidget):
         """Display fetched metadata in the info box."""
         self._info_worker = None
         self.info_btn.setEnabled(True)
-        self.info_btn.setText("Info")
+        self._sync_queue_actions()
         if self._batch is None:
             self.status_label.setText("Ready.")
-            self.download_btn.setEnabled(True)
-
         mins = ""
         if length_sec:
             m, s = divmod(int(length_sec), 60)
@@ -688,10 +778,9 @@ class DownloadTab(QWidget):
     def _on_info_error(self, err: str) -> None:
         self._info_worker = None
         self.info_btn.setEnabled(True)
-        self.info_btn.setText("Info")
+        self._sync_queue_actions()
         if self._batch is None:
             self.status_label.setText("Ready.")
-            self.download_btn.setEnabled(True)
         # Darker than STATUS_COLORS["failed"] (#e53e3e) on purpose: this is
         # body text in the info box, and #a62929 keeps AA contrast on the
         # light background while #e53e3e is the status *mark* red.
@@ -757,7 +846,6 @@ class DownloadTab(QWidget):
             self._info_worker.wait(3000)
             self._info_worker = None
             self.info_btn.setEnabled(True)
-            self.info_btn.setText("Info")
 
         # Disable UI immediately so the user can't double-submit or touch
         # the queue mid-batch (edits can't reach the running snapshot and
@@ -1148,7 +1236,6 @@ class DownloadTab(QWidget):
             info.cancel()
             self._info_worker = None
             self.info_btn.setEnabled(True)
-            self.info_btn.setText("Info")
         self._cancel_download()
 
     def running_workers(self) -> list[QThread]:
@@ -1188,3 +1275,7 @@ class DownloadTab(QWidget):
         self._eta_format = "%p%"
         self.dl_progress.setFormat("%p%")
         self.cancel_btn.setEnabled(False)
+        # The thaw restores the pre-batch state, but the batch may have just
+        # emptied the queue (clear_queue=True) — Start/Remove/Clear must end
+        # up matching the *current* queue (P3).
+        self._sync_queue_actions()

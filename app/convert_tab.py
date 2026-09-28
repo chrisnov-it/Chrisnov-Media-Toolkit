@@ -13,6 +13,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from PySide6.QtCore import QSize, Qt, QThread, Signal
+from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QButtonGroup,
@@ -37,6 +38,7 @@ from PySide6.QtWidgets import (
 )
 
 from .cleaner import parse_tag_list
+from .constants import CLEAR_CONFIRM_ROWS
 from .converter_worker import (
     AUDIO_BITRATES as CONV_BITRATES,
 )
@@ -99,6 +101,9 @@ class AudioConverterTab(QWidget):
         #: Last converted file — what "Open last result" opens.
         self._last_result: Path | None = None
         self._build_ui()
+        # Idle state: no files yet, so Convert/Remove/Clear start disabled
+        # instead of dead-clickable (P3).
+        self._conv_sync_actions()
 
     # ------------------------------------------------------------------ #
     #  Public API — used by MainWindow (drag-drop)                         #
@@ -329,6 +334,22 @@ class AudioConverterTab(QWidget):
             self.conv_dir_input, conv_browse_btn,
         ]
 
+        # Accessibility names: a screen reader hears "Files to convert"
+        # instead of nothing for the list, and the folder field names itself.
+        self.conv_file_list.setAccessibleName("Files to convert")
+        self.conv_dir_input.setAccessibleName("Conversion output folder")
+
+        # P3 shortcuts: Ctrl+Enter converts, Esc cancels — guarded because a
+        # live signal must not start a second batch over a running one, and
+        # an idle Esc must never wipe the file list (reset clears it).
+        for seq in ("Ctrl+Return", "Ctrl+KeypadEnter"):
+            start_sc = QShortcut(QKeySequence(seq), self)
+            start_sc.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
+            start_sc.activated.connect(self._conv_start_if_idle)
+        esc_sc = QShortcut(QKeySequence(Qt.Key.Key_Escape), self)
+        esc_sc.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
+        esc_sc.activated.connect(self._conv_cancel_if_running)
+
     # ------------------------------------------------------------------ #
     #  File list helpers                                                   #
     # ------------------------------------------------------------------ #
@@ -372,6 +393,7 @@ class AudioConverterTab(QWidget):
         # Full path on hover — the label is only the file name.
         item.setToolTip(str(path))
         self.conv_file_list.addItem(item)
+        self._conv_sync_actions()
 
     def _conv_add_folder(self, folder: Path) -> int:
         """Add supported audio/video files from a folder tree.
@@ -418,10 +440,25 @@ class AudioConverterTab(QWidget):
             if 0 <= row < len(self._conv_files):
                 self._conv_files.pop(row)
             self.conv_file_list.takeItem(row)
+        self._conv_sync_actions()
 
     def _conv_clear_files(self) -> None:
+        # Confirm once the list is big enough to hurt to rebuild (P3) —
+        # Clear All history already asked, but a folder's worth of files
+        # was wiped by a single misclick.
+        n = len(self._conv_files)
+        if n >= CLEAR_CONFIRM_ROWS:
+            ans = QMessageBox.question(
+                self, "Clear file list",
+                f"Remove all {n} file(s) from the list?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if ans != QMessageBox.StandardButton.Yes:
+                return
         self._conv_files.clear()
         self.conv_file_list.clear()
+        self._conv_sync_actions()
         self.conv_status_label.setText("File list cleared.")
 
     def _conv_browse_dir(self) -> None:
@@ -457,6 +494,32 @@ class AudioConverterTab(QWidget):
     # ------------------------------------------------------------------ #
     #  Conversion flow                                                     #
     # ------------------------------------------------------------------ #
+
+    def _conv_sync_actions(self) -> None:
+        """Keep Convert/Remove/Clear enabled exactly when they can act.
+
+        Convert used to stay clickable with an empty list and answer with a
+        warning (P3); now it is disabled until a file is queued. A running
+        batch owns these states (set_controls_busy saved them at freeze),
+        so the sync stays out while _conv_active is set.
+        """
+        if self._conv_active:
+            return
+        has_files = bool(self._conv_files)
+        self.conv_start_btn.setEnabled(has_files)
+        self.conv_remove_btn.setEnabled(has_files)
+        self.conv_clear_btn.setEnabled(has_files)
+
+    def _conv_start_if_idle(self) -> None:
+        """Ctrl+Enter: convert only when no batch is running."""
+        if not self._conv_active:
+            self._conv_start()
+
+    def _conv_cancel_if_running(self) -> None:
+        """Esc: cancel only a running batch — an idle press must never
+        wipe the file list (_conv_reset clears it)."""
+        if self._conv_active:
+            self._conv_cancel()
 
     def _conv_start(self) -> None:
         if not self._conv_files:
@@ -689,6 +752,9 @@ class AudioConverterTab(QWidget):
         self.conv_cancel_btn.setEnabled(False)
         self._conv_worker = None
         self._conv_active = False
+        # The thaw restores the pre-batch state, but the reset just emptied
+        # the list — Convert/Remove/Clear must match it (P3).
+        self._conv_sync_actions()
 
     # ------------------------------------------------------------------ #
     #  Shutdown — MainWindow.closeEvent polls these until they return []     #

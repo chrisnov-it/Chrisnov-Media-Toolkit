@@ -198,6 +198,43 @@ All notable changes to this project are documented here.
   quote a total size that included hidden files. The summary now describes what
   is on screen: "(1 of 2 items, 12.3 MB shown)".
 
+- **Emoji glyphs rendered differently — or as tofu — depending on the font**
+  History rows (🎵🎬📋📁 + ✅/❌ status), the Downloader's playlist marker 📋
+  and the History legend (📂/🔁) all leaned on whatever symbols the user's
+  fonts happen to ship — the exact failure that already forced the tab icons
+  to bundled SVGs (▣ showed as a box on Linux Mint). Status marks now reuse
+  the queue's SVG `queue_status_icon()` (green check / red cross), playlist
+  rows get a new bundled `clipboard` icon, the legend pairs its labels with
+  the platform style's standard pixmaps, and row text keeps only the status
+  *word*.
+
+- **Secondary font sizes ignored the platform base**
+  Hardcoded 7pt/8pt/9pt/10pt literals don't scale with the base the theme
+  picks (11pt on macOS), where an "8pt" hint ends up nearly the same size as
+  the base text it should sit under. `small_font_size()` / `tiny_font_size()`
+  now derive from `_base_font_points()`, and every literal call site uses
+  them (About dialog, History title/summary/legend, in-list placeholders,
+  version/about controls) — unit tests assert the stylesheet contains no
+  literal sizes at all.
+
+- **The Info button's label turned into "..." while fetching**
+  The button mutated its own text (and disabled Start for the duration) with
+  no word on screen about what was happening. It now keeps its "Info" label,
+  disables itself, and the status line reports "Fetching info..."; the
+  result/error handlers re-sync Start instead of unconditionally enabling it.
+
+- **The cleanup-tag list and the cookie path were clipped with no way to
+  read them**
+  The tag field is a 440-char comma list scrolled to the right (its start
+  was cut off on screen) and the cookie label sliced paths at 40 chars. Both
+  now carry their full text on hover, updated when the cookie file changes.
+
+- **Clearing the queue or a file list could silently wipe hours of work**
+  "Clear All" in History confirmed, but the Downloader's Clear and both
+  converter Clears removed every row with one misclick. At
+  `CLEAR_CONFIRM_ROWS` (5) rows or more they now ask first (default No);
+  below the threshold clearing stays instant.
+
 - **The Downloader's settings stayed editable while a batch ran**
   Both converter tabs froze theirs, but resolution, container, checkboxes,
   folder and cleanup-tag inputs could all be changed mid-run — changes the
@@ -233,6 +270,15 @@ All notable changes to this project are documented here.
   dict *copy*, so identity matching could not work), making removal safe from
   a filtered view and a stale selection a silent no-op.
 
+- **Ctrl+Enter starts, Esc cancels**
+  Bound on all three worker tabs (`WidgetWithChildrenShortcut`): Ctrl+Enter
+  (and Ctrl+KeypadEnter) triggers Start/Convert — with an empty list it just
+  reaches the same validation as a click — while Esc cancels a *running*
+  batch only. Both handlers are guarded because they fire on a live signal:
+  Ctrl+Enter must not snapshot a second batch over a running one, and an idle
+  Esc must never wipe the queue/list (cancel clears it). Delete already
+  removes a History row.
+
 ### Changed
 
 - **Download progress shows where you are in the queue and when it ends**
@@ -252,6 +298,19 @@ All notable changes to this project are documented here.
   (previously only GB/MB), and the missing-cleanup-tags warning tells the user
   what to do instead of ending with "Returning.".
 
+- **Primary buttons follow the work list instead of warning after the fact**
+  Start/Remove/Clear (Downloader) and Convert/Remove/Clear (both converters)
+  used to stay clickable while empty and only answered with a warning dialog —
+  or nothing at all. They now start disabled and arm when the queue/list
+  holds something (Start also with a typed URL), re-synced after a batch thaw
+  so a reset that emptied the list disarms them again. The warning dialogs
+  remain as validation for direct calls (shortcuts, tests).
+
+- **Key inputs name themselves for screen readers**
+  `accessibleName`s on the URL field, queue, cleanup-tag and output-folder
+  fields, both converter file lists, and the History search/list/filter —
+  previously a screen reader heard nothing for any of them.
+
 - **CI and release hardening** - workflows declare
   `permissions: contents: read`; the release `version` input is validated
   against a strict pattern before it reaches `GITHUB_ENV`, artifact names or
@@ -264,7 +323,7 @@ All notable changes to this project are documented here.
   release `.sha256` files now carry `hash  filename` like the Linux/macOS
   ones, so `sha256sum -c` accepts them.
 
-- **Tests** - the suite grew from 171 to 240 (`tests/test_theme.py`,
+- **Tests** - the suite grew from 171 to 242 (`tests/test_theme.py`,
   `tests/test_utils.py` and `tests/test_main_excepthook.py` are new), with
   regression coverage for every
   fix above, exact-value assertions where checks were vacuous, and skip guards

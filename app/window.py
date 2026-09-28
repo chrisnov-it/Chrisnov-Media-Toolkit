@@ -54,7 +54,15 @@ from .history import DownloadHistory
 from .history_tab import HistoryTab
 from .icon import bundled_icon, palette_icon_color
 from .settings import AppSettings
-from .theme import apply_aa_placeholder, muted_color, widget_stylesheet, with_aa_placeholder
+from .theme import (
+    _base_font_size,
+    apply_aa_placeholder,
+    muted_color,
+    small_font_size,
+    tiny_font_size,
+    widget_stylesheet,
+    with_aa_placeholder,
+)
 from .update_check import UpdateCheckWorker
 from .video_convert_tab import VideoConvertTab
 from .worker_tracking import WorkerTracker
@@ -547,7 +555,10 @@ class MainWindow(QWidget):
 
         ver_lbl = QLabel(f"Version {APP_VERSION}")
         ver_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        ver_lbl.setStyleSheet("font-size: 9pt; color: palette(text); margin-bottom: 12px;")
+        ver_lbl.setStyleSheet(
+            f"font-size: {_base_font_size()}; color: palette(text);"
+            " margin-bottom: 12px;"
+        )
         layout.addWidget(ver_lbl)
 
         # Divider
@@ -562,9 +573,13 @@ class MainWindow(QWidget):
             is filled in asynchronously (FFmpeg) can be updated later."""
             row = QHBoxLayout()
             lbl = QLabel(label)
-            lbl.setStyleSheet("color: palette(text); font-size: 9pt;")
+            lbl.setStyleSheet(
+                f"color: palette(text); font-size: {_base_font_size()};"
+            )
             val = QLabel(value)
-            val.setStyleSheet("color: palette(windowText); font-size: 9pt;")
+            val.setStyleSheet(
+                f"color: palette(windowText); font-size: {_base_font_size()};"
+            )
             val.setAlignment(Qt.AlignmentFlag.AlignRight)
             row.addWidget(lbl)
             row.addStretch()
@@ -582,7 +597,9 @@ class MainWindow(QWidget):
         # dialog never blocks on the network (see app/update_check.py) and only
         # a genuinely newer version is advertised.
         notice = QLabel("")
-        notice.setStyleSheet("color: #e53e3e; font-size: 9pt; margin-top: 8px;")
+        notice.setStyleSheet(
+            f"color: #e53e3e; font-size: {_base_font_size()}; margin-top: 8px;"
+        )
         # Note: red error color is intentional — should remain red in both modes
         notice.setAlignment(Qt.AlignmentFlag.AlignCenter)
         notice.hide()
@@ -600,7 +617,9 @@ class MainWindow(QWidget):
             "built with PySide6, yt-dlp, and FFmpeg."
         )
         desc.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        desc.setStyleSheet("font-size: 9pt; color: palette(text);")
+        # Secondary sizes derive from the platform base (P3): a hardcoded
+        # 8pt/7pt pair would nearly match the 11pt macOS base.
+        desc.setStyleSheet(f"font-size: {_base_font_size()}; color: palette(text);")
         layout.addWidget(desc)
 
         credit = QLabel(
@@ -612,7 +631,10 @@ class MainWindow(QWidget):
             '© Chrisnov IT Solutions</a>'
         )
         credit.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        credit.setStyleSheet("font-size: 8pt; color: palette(text); margin-top: 4px;")
+        credit.setStyleSheet(
+            f"font-size: {small_font_size()}; color: palette(text);"
+            " margin-top: 4px;"
+        )
         credit.setOpenExternalLinks(True)
         layout.addWidget(credit)
 
@@ -622,7 +644,9 @@ class MainWindow(QWidget):
             "chrisnov-it on GitHub</a>"
         )
         gh_link.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        gh_link.setStyleSheet("font-size: 7pt; color: palette(text);")
+        gh_link.setStyleSheet(
+            f"font-size: {tiny_font_size()}; color: palette(text);"
+        )
         gh_link.setOpenExternalLinks(True)
         layout.addWidget(gh_link)
 

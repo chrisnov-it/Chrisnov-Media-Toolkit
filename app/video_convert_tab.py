@@ -12,6 +12,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from PySide6.QtCore import QSize, Qt, QThread, Signal
+from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
@@ -32,6 +33,7 @@ from PySide6.QtWidgets import (
 )
 
 from .cleaner import parse_tag_list
+from .constants import CLEAR_CONFIRM_ROWS
 from .converter_worker import (
     PROGRESS_BAND,
     VIDEO_INPUT_EXTENSIONS,
@@ -88,6 +90,9 @@ class VideoConvertTab(QWidget):
         #: Last converted file — what "Open last result" opens.
         self._last_result: Path | None = None
         self._build_ui()
+        # Idle state: no files yet, so Convert/Remove/Clear start disabled
+        # instead of dead-clickable (P3).
+        self._video_conv_sync_actions()
 
     # ------------------------------------------------------------------ #
     #  Public API — used by MainWindow (drag-drop)                         #
@@ -243,6 +248,24 @@ class VideoConvertTab(QWidget):
             self.video_conv_dir_input, video_conv_browse_btn,
         ]
 
+        # Accessibility names: a screen reader hears what the list and the
+        # folder field are for instead of silence.
+        self.video_conv_file_list.setAccessibleName("Videos to convert")
+        self.video_conv_dir_input.setAccessibleName(
+            "Video conversion output folder"
+        )
+
+        # P3 shortcuts: Ctrl+Enter converts, Esc cancels — guarded because a
+        # live signal must not start a second batch over a running one, and
+        # an idle Esc must never wipe the file list (reset clears it).
+        for seq in ("Ctrl+Return", "Ctrl+KeypadEnter"):
+            start_sc = QShortcut(QKeySequence(seq), self)
+            start_sc.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
+            start_sc.activated.connect(self._video_conv_start_if_idle)
+        esc_sc = QShortcut(QKeySequence(Qt.Key.Key_Escape), self)
+        esc_sc.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
+        esc_sc.activated.connect(self._video_conv_cancel_if_running)
+
     # ------------------------------------------------------------------ #
     #  File list helpers                                                   #
     # ------------------------------------------------------------------ #
@@ -285,6 +308,7 @@ class VideoConvertTab(QWidget):
         # Full path on hover — the label is only the file name.
         item.setToolTip(str(path))
         self.video_conv_file_list.addItem(item)
+        self._video_conv_sync_actions()
 
     def _video_conv_add_folder(self, folder: Path) -> int:
         """Queue supported video files under a folder (bounded walk).
@@ -332,10 +356,24 @@ class VideoConvertTab(QWidget):
             if 0 <= row < len(self._video_conv_files):
                 self._video_conv_files.pop(row)
             self.video_conv_file_list.takeItem(row)
+        self._video_conv_sync_actions()
 
     def _video_conv_clear_files(self) -> None:
+        # Confirm once the list is big enough to hurt to rebuild (P3) —
+        # same guard as the audio tab's Clear.
+        n = len(self._video_conv_files)
+        if n >= CLEAR_CONFIRM_ROWS:
+            ans = QMessageBox.question(
+                self, "Clear file list",
+                f"Remove all {n} video file(s) from the list?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if ans != QMessageBox.StandardButton.Yes:
+                return
         self._video_conv_files.clear()
         self.video_conv_file_list.clear()
+        self._video_conv_sync_actions()
         self.video_conv_status_label.setText("File list cleared.")
 
     def _video_conv_browse_dir(self) -> None:
@@ -349,6 +387,30 @@ class VideoConvertTab(QWidget):
     # ------------------------------------------------------------------ #
     #  Conversion flow                                                     #
     # ------------------------------------------------------------------ #
+
+    def _video_conv_sync_actions(self) -> None:
+        """Keep Convert/Remove/Clear enabled exactly when they can act.
+
+        Same contract as the audio tab (P3): disabled until a video is
+        queued, kept out while a batch owns the state.
+        """
+        if self._video_conv_active:
+            return
+        has_files = bool(self._video_conv_files)
+        self.video_conv_start_btn.setEnabled(has_files)
+        self.video_conv_remove_btn.setEnabled(has_files)
+        self.video_conv_clear_btn.setEnabled(has_files)
+
+    def _video_conv_start_if_idle(self) -> None:
+        """Ctrl+Enter: convert only when no batch is running."""
+        if not self._video_conv_active:
+            self._video_conv_start()
+
+    def _video_conv_cancel_if_running(self) -> None:
+        """Esc: cancel only a running batch — an idle press must never
+        wipe the file list (_video_conv_reset clears it)."""
+        if self._video_conv_active:
+            self._video_conv_cancel()
 
     def _video_conv_start(self) -> None:
         if not self._video_conv_files:
@@ -560,6 +622,9 @@ class VideoConvertTab(QWidget):
         self.video_conv_cancel_btn.setEnabled(False)
         self._video_conv_worker = None
         self._video_conv_active = False
+        # The thaw restores the pre-batch state, but the reset just emptied
+        # the list — Convert/Remove/Clear must match it (P3).
+        self._video_conv_sync_actions()
 
     # ------------------------------------------------------------------ #
     #  Shutdown — MainWindow.closeEvent polls these until they return []     #

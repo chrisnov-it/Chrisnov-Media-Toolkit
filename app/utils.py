@@ -10,6 +10,8 @@ from PySide6.QtCore import QEvent, Qt, QUrl
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import QLabel, QListWidget, QWidget
 
+from .theme import _base_font_size
+
 #: Tooltip swapped onto controls while a batch freezes them. Tooltips *do*
 #: fire on disabled widgets (verified on native Windows), so this is the one
 #: place to answer "why can't I click this?".
@@ -85,7 +87,10 @@ class ListPlaceholder(QLabel):
         self._list = list_widget
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.setWordWrap(True)
-        self.setStyleSheet("color: palette(text); font-size: 9pt; padding: 24px;")
+        self.setStyleSheet(
+            "color: palette(text); font-size: "
+            f"{_base_font_size()}; padding: 24px;"
+        )
         # Clicks/selection must reach the list (and its scrollbar), never me.
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
         model = list_widget.model()

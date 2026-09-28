@@ -214,6 +214,33 @@ def main() -> None:
           and not vid.open_last_btn.isEnabled(),
           "'Open last result' starts disabled until something finishes")
 
+    # --- Primary actions follow the work, not the clock (P3) ------------------
+    # Start/Convert used to stay clickable with nothing queued and only
+    # answered with a warning dialog; Remove/Clear did nothing at all.
+    check(not dl.download_btn.isEnabled()
+          and not dl.remove_btn.isEnabled()
+          and not dl.clear_btn.isEnabled(),
+          "Downloader primary actions must start disabled with an empty queue")
+    check(not conv.conv_start_btn.isEnabled()
+          and not conv.conv_remove_btn.isEnabled()
+          and not conv.conv_clear_btn.isEnabled()
+          and not vid.video_conv_start_btn.isEnabled()
+          and not vid.video_conv_remove_btn.isEnabled()
+          and not vid.video_conv_clear_btn.isEnabled(),
+          "converter primary actions must start disabled with empty lists")
+
+    # Key inputs name themselves for screen readers (P3).
+    for widget, name in (
+        (dl.url_input, "Video URL"),
+        (dl.queue_list, "Download queue"),
+        (conv.conv_file_list, "Files to convert"),
+        (vid.video_conv_file_list, "Videos to convert"),
+        (hist._history_search, "Search history"),
+        (hist._history_list, "Download history"),
+    ):
+        check(widget.accessibleName() == name,
+              f"{widget!r} should carry the accessible name {name!r}")
+
     # --- Downloader queue --------------------------------------------------
     n0 = dl.queue_list.count()
     ok = add_url(dl, "https://www.youtube.com/watch?v=abc123")
@@ -229,8 +256,10 @@ def main() -> None:
     ok = add_url(dl, "https://www.youtube.com/playlist?list=PLsmoke123")
     check(ok is True, "add_url(playlist) should return True")
     check(dl.queue_list.count() == n0 + 2, "playlist URL should be queued")
-    check(dl.queue_list.item(n0 + 1).text().startswith("\U0001f4cb"),
-          "playlist label should start with clipboard icon")
+    check(not dl.queue_list.item(n0 + 1).icon().isNull(),
+          "playlist label should carry the clipboard icon (not a glyph)")
+    check("\U0001f4cb" not in dl.queue_list.item(n0 + 1).text(),
+          "playlist label must not depend on an emoji rendering")
     check("Playlist detected" in dl.status_label.text(),
           "playlist URL should flag 'Playlist detected'")
 
@@ -298,6 +327,16 @@ def main() -> None:
     )
     history_render(hist, w)
     check(hist._history_list.count() == 2, "history should render 2 entries")
+
+    # History rows carry their status as an icon and never as emoji text
+    # (P3): glyphs rendered differently — or as tofu — per font.
+    for i in range(hist._history_list.count()):
+        row_item = hist._history_list.item(i)
+        check(not row_item.icon().isNull(),
+              f"history row {i} should carry a status icon")
+        check(not any(ch in row_item.text() for ch in "✅❌🎵🎬📁📋📂🔁"),
+              f"history row {i} must not depend on emoji glyphs, "
+              f"got {row_item.text()!r}")
 
     # Search narrows to zero and shows the placeholder
     hist._history_search.setText("zzznomatch")
@@ -371,6 +410,26 @@ def main() -> None:
     check(conv.conv_file_list.count() == 0, "clear should empty converter list")
     check(not conv._conv_empty.isHidden(),
           "conv empty placeholder should return after clear")
+    check(not conv.conv_start_btn.isEnabled(),
+          "Convert must disable again once the list empties (P3)")
+
+    # --- Clearing many rows asks first (P3) ---------------------------------
+    from app.constants import CLEAR_CONFIRM_ROWS
+
+    for i in range(CLEAR_CONFIRM_ROWS):
+        conv._conv_add_file(Path(f"/cmt-smoke/clear-{i}.mp3"))
+    _StubMessageBox.calls.clear()
+    _StubMessageBox.answer = _StubMessageBox.No
+    conv._conv_clear_files()
+    check(any(t == "Clear file list" for _, t, _ in _StubMessageBox.calls),
+          "clearing a long file list should ask for confirmation")
+    check(conv.conv_file_list.count() == CLEAR_CONFIRM_ROWS,
+          "declining the clear confirm must keep every file")
+    _StubMessageBox.answer = _StubMessageBox.Yes
+    conv._conv_clear_files()
+    check(conv.conv_file_list.count() == 0,
+          "confirming the clear must empty the list")
+    _StubMessageBox.answer = None
 
     # --- Video converter file lists -----------------------------------------
     check(not vid._video_conv_empty.isHidden(),
@@ -427,6 +486,10 @@ def main() -> None:
           "the settings' original tooltips must come back as well")
 
     # The same helper, exercised directly on the Downloader's Start button.
+    # Seed a queued URL first: Start is now disabled while the queue is
+    # empty (P3), and this test is about freeze/thaw restoring *whatever*
+    # state the button had.
+    add_url(dl, "https://example.com/busy-state")
     orig_dl_tip = dl.download_btn.toolTip()
     set_controls_busy((dl.download_btn,), True)
     check(not dl.download_btn.isEnabled()
@@ -522,20 +585,27 @@ def main() -> None:
     check(tracked2() == 0, "converter tracker should release its worker")
 
     # --- Idle cancel guards --------------------------------------------------
+    # Cancelling with no batch must reset the tab — and every primary action
+    # must end up reflecting the *current* work list (P3): the reset clears
+    # the queue/list, so Start/Convert come back disabled, not dead-clickable.
     dl._cancel_download()
-    check(dl.download_btn.isEnabled(), "idle cancel should leave Start enabled")
+    check(dl._batch is None and not dl.download_btn.isEnabled(),
+          "idle cancel should reset and leave Start disabled with a cleared queue")
     check(not dl.cancel_btn.isEnabled(), "idle cancel should leave Cancel disabled")
 
     conv._conv_cancel()
-    check(conv.conv_start_btn.isEnabled(), "idle conv cancel should leave Convert enabled")
+    check(not conv._conv_active and not conv.conv_start_btn.isEnabled(),
+          "idle conv cancel should reset and leave Convert disabled (no files)")
     vid._video_conv_cancel()
-    check(vid.video_conv_start_btn.isEnabled(), "idle video cancel should leave Convert enabled")
+    check(not vid._video_conv_active and not vid.video_conv_start_btn.isEnabled(),
+          "idle video cancel should reset and leave Convert disabled (no files)")
 
     # --- Start guards ---------------------------------------------------------
     _StubMessageBox.calls.clear()
     dl._start_download()
     check(find_warning("No URLs"), "empty queue should warn 'No URLs'")
-    check(dl.download_btn.isEnabled(), "empty-queue guard should not start a batch")
+    check(dl._batch is None and not dl.download_btn.isEnabled(),
+          "empty-queue guard should not start a batch, and Start stays off")
 
     add_url(dl, "https://example.com/x")
     dl.dir_input.setText("/nonexistent-cmt-smoke")
@@ -554,6 +624,82 @@ def main() -> None:
         check(dl.download_btn.isEnabled(), "clean-tags guard should not start a batch")
 
     dl._clear_queue()
+
+    # --- Clearing the queue asks first once it is long (P3) -------------------
+    for i in range(CLEAR_CONFIRM_ROWS):
+        add_url(dl, f"https://example.com/confirm-{i}")
+    check(dl.download_btn.isEnabled(),
+          "a non-empty queue should enable Start")
+    _StubMessageBox.calls.clear()
+    _StubMessageBox.answer = _StubMessageBox.No
+    dl._clear_queue()
+    check(any(t == "Clear queue" for _, t, _ in _StubMessageBox.calls),
+          "clearing a long queue should ask for confirmation")
+    check(dl.queue_list.count() == CLEAR_CONFIRM_ROWS,
+          "declining the clear confirm must keep every URL")
+    _StubMessageBox.answer = _StubMessageBox.Yes
+    dl._clear_queue()
+    check(dl.queue_list.count() == 0,
+          "confirming the clear must empty the queue")
+    _StubMessageBox.answer = None
+
+    # --- P3 shortcuts: Ctrl+Enter starts, Esc cancels (guarded) ---------------
+    from PySide6.QtGui import QKeySequence as _QS
+    from PySide6.QtGui import QShortcut as _QShortcut
+
+    def _shortcuts(widget, *keys):
+        wanted = {_QS(k).toString() for k in keys}
+        return [sc for sc in widget.findChildren(_QShortcut)
+                if sc.key().toString() in wanted]
+
+    dl_enter = _shortcuts(dl, "Ctrl+Return", "Ctrl+KeypadEnter", "Ctrl+Enter")
+    dl_esc = _shortcuts(dl, "Esc")
+    check(dl_enter, "the Downloader should bind Ctrl+Enter to Start")
+    check(dl_esc, "the Downloader should bind Esc to Cancel")
+    conv_enter = _shortcuts(conv, "Ctrl+Return", "Ctrl+KeypadEnter", "Ctrl+Enter")
+    conv_esc = _shortcuts(conv, "Esc")
+    check(conv_enter and conv_esc,
+          "the audio converter should bind Ctrl+Enter and Esc")
+    vid_enter = _shortcuts(vid, "Ctrl+Return", "Ctrl+KeypadEnter", "Ctrl+Enter")
+    vid_esc = _shortcuts(vid, "Esc")
+    check(vid_enter and vid_esc,
+          "the video converter should bind Ctrl+Enter and Esc")
+
+    # Functional wiring: with an empty queue Ctrl+Enter reaches Start's
+    # validation (the button itself is disabled, the shortcut is not).
+    _StubMessageBox.calls.clear()
+    dl_enter[0].activated.emit()
+    check(find_warning("No URLs"),
+          "Ctrl+Enter with an empty queue should trigger Start")
+
+    # Esc with no batch running must never wipe the queue (the cancel path
+    # clears it — the shortcut is guarded precisely for that).
+    add_url(dl, "https://example.com/esc-idle")
+    dl_esc[0].activated.emit()
+    check(dl.queue_list.count() == 1,
+          "an idle Esc must not cancel anything or clear the queue")
+    dl._clear_queue()
+
+    # Esc with a batch running cancels it.
+    from app.download_tab import BatchState
+
+    add_url(dl, "https://example.com/esc-busy")
+    dl._batch = BatchState(
+        urls=list(dl.current_batch), outdir=_TMP_HOME, audio_only=True,
+        height=None, container="mp3", bitrate=192, clean_tags=None,
+        embed_metadata=False, embed_thumbnail=False, archive_path=None,
+    )
+    dl_esc[0].activated.emit()
+    check(dl._batch is None,
+          "Esc should cancel a running batch")
+
+    # Converter Ctrl+Enter with an empty list reaches the validation too.
+    _StubMessageBox.calls.clear()
+    conv_enter[0].activated.emit()
+    check(find_warning("No files"),
+          "converter Ctrl+Enter with no files should warn")
+    check(not conv._conv_active,
+          "converter Ctrl+Enter must not start a batch without files")
 
     # --- History re-queue action ----------------------------------------------
     history_render(hist, w)
@@ -838,8 +984,11 @@ def main() -> None:
     check(any("disk on fire" in m for m in logged),
           "the history failure should be logged for diagnosis")
     check(dl._batch is None, "single-item batch should reset after the failure")
-    check(dl.download_btn.isEnabled(),
-          "the queue must not be left stranded with Start disabled")
+    # Start follows the queue — with one exception: a URL still sitting in
+    # the input field is startable too. Clear it to assert the queue rule.
+    dl.url_input.clear()
+    check(not dl.download_btn.isEnabled(),
+          "the batch cleared the queue, so Start must follow it (disabled)")
     dl._clear_queue()
 
     # --- A vanished file must not be recorded as completed (MEDIUM) ----------
@@ -1007,8 +1156,8 @@ def main() -> None:
           "cancel must set the worker's cancel flag")
     check(worker_ref.isRunning(),
           "cancel must not terminate() the thread (it is still winding down)")
-    check(dl._batch is None and dl.download_btn.isEnabled(),
-          "cancel should reset the batch state and re-enable Start")
+    check(dl._batch is None and not dl.download_btn.isEnabled(),
+          "cancel must reset the batch state; Start follows the cleared queue")
     worker_ref.wait()
 
     # Audio converter: same guarantees.
@@ -1024,8 +1173,8 @@ def main() -> None:
     check(conv_elapsed < 0.4, f"convert cancel blocked the GUI for {conv_elapsed:.2f}s")
     check(conv_worker.cancelled, "convert cancel must set the cancel flag")
     check(conv_worker.isRunning(), "convert cancel must not terminate() the thread")
-    check(conv.conv_start_btn.isEnabled(),
-          "convert cancel should re-enable the Convert button")
+    check(not conv.conv_start_btn.isEnabled(),
+          "convert cancel must reset the list; Convert follows it (disabled)")
     conv_worker.wait()
 
     # --- Dropping a binary file must not raise (HIGH) -------------------------

@@ -19,9 +19,13 @@ import re
 from PySide6.QtGui import QColor, QPalette
 
 from app.theme import (
+    _base_font_points,
+    _base_font_size,
     _blend,
     contrast_ratio,
     muted_color,
+    small_font_size,
+    tiny_font_size,
     widget_stylesheet,
     with_aa_placeholder,
 )
@@ -342,3 +346,35 @@ class TestRadioIndicator:
                 "background",
             )
             assert dim == colors["mid"]
+
+
+class TestSecondaryFontSizes:
+    """P3: secondary text used hardcoded 7pt/8pt literals.
+
+    A literal ignores the platform base (11pt on macOS), where an '8pt'
+    hint is barely smaller than the 9-10pt base text it is supposed to sit
+    under. Every secondary size must derive from the base instead.
+    """
+
+    def test_small_and_tiny_derive_from_the_base(self):
+        base = _base_font_points()
+        assert _base_font_size() == f"{base}pt"
+        assert small_font_size() == f"{base - 1}pt"
+        assert tiny_font_size() == f"{base - 2}pt"
+        # The steps stay distinct: collapsing them would flatten the
+        # hierarchy the sizes exist to express.
+        assert small_font_size() != tiny_font_size() != _base_font_size()
+
+    def test_stylesheet_secondary_rules_use_the_derived_size(self):
+        for colors in (LIGHT, DARK):
+            css = _stylesheet(colors)
+            assert f"font-size: {small_font_size()}" in css, (
+                "the About dialog's secondary labels must use the derived "
+                "size, not a literal"
+            )
+            # Remove every derived occurrence: what is left must contain no
+            # hardcoded literal at all (on any platform).
+            stripped = css.replace(f"font-size: {small_font_size()}", "")
+            stripped = stripped.replace(f"font-size: {tiny_font_size()}", "")
+            assert "font-size: 7pt" not in stripped
+            assert "font-size: 8pt" not in stripped
