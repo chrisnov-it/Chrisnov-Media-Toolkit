@@ -6,7 +6,84 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
+## [0.2.0-beta.5] — 2026-10-07
+
+### Added
+
+- **Embedded tags now stay in step with Clean Title** (`app/tags.py`)
+  `rename_with_cleanup` only renamed the file, so a download with both
+  Clean Title and Embed Metadata ended up with a cleaned filename and the
+  raw YouTube title still inside the file. The rename path now repairs the
+  embedded title tag too (`sync_embedded_tags()`, backed by the newly
+  pinned `mutagen==1.48.1`), and also strips the wall of promo
+  links/subscribe spam YouTube descriptions carry into the `description`
+  tag — the first useful paragraph is kept. Both are best-effort and
+  self-fenced: a tag-layer failure can never fail an already-finished
+  download. Works for mp3 (ID3), m4a/mp4 (`©nam`/`desc`), and ogg/opus/
+  matroska comment tags.
+
+- **Source-URL comments no longer written into files**
+  yt-dlp's FFmpegMetadata copies the video URL into `©cmt` (m4a), `COMM`
+  and `TXXX:comment`/`TXXX:purl` (mp3), and vorbis `comment`. The tag
+  repair now deletes any comment whose value is a bare URL — a real,
+  human-written comment is never touched.
+
+- **M4A year shown as `10377` instead of `2026`**
+  FFmpegMetadata writes the full YouTube upload date (`20261001`) into the
+  m4a `©day` atom, and players that read it as a 16-bit int overflow it —
+  `20261001 & 0xFFFF == 10377`. The tag repair now collapses compact
+  (`YYYYMMDD`) and ISO (`YYYY-MM-DD`) dates to the bare 4-digit year, in
+  m4a/mp4, mp3 (`TDRC`), and vorbis comment tags. The repair runs even
+  when Clean Title is disabled, since it fixes yt-dlp's metadata rather
+  than the filename.
+
+- **`Artist - Song` split out of the embedded title field**
+  FFmpegMetadata stores the whole video title, so files ended up with
+  `title = "Rick Astley - Never Gonna Give You Up"` while the artist tag
+  went unused. The tag repair now splits on the first ` - ` (en/em dashes
+  too): the song lands in `title`, and `artist` is filled only when it's
+  missing or empty (a real artist value is never overwritten). mp3 (TPE1),
+  m4a/mp4 (`©ART`), and vorbis comment tags are all handled.
+
+- **Tag-repair script for existing libraries** (`scripts/repair_tags.py`)
+  Files downloaded by earlier releases keep their bad tags until touched.
+  The script repairs them in place — title cleanup + artist split, year
+  normalization, description trimming, URL-comment removal — with
+  `--dry-run` for a preview, `--recursive` for folders, `--rename` to also
+  apply the Clean Title filename, and `--tags` for a custom tag list.
+
+- **Cover art for opus output** (`app/yt_dlp_opts.py`)
+  yt-dlp's thumbnail embedding for ogg/opus/flac *requires* mutagen and
+  raises without it, so the opus container was silently excluded from
+  `_thumbnail_supported()`. With mutagen pinned, opus audio downloads get
+  embedded cover art like mp3/m4a now do.
+
 ### Fixed
+
+- **Playlist downloads stopped after the first item** (`app/worker.py`)
+  A single mid-playlist failure (`ERROR: unable to download video data:
+  HTTP Error 403/503`, or one unavailable video) was raised out of the one
+  `extract_info()` call and abandoned everything after it. Playlist runs now
+  set yt-dlp's `ignoreerrors='only_download'` so a bad entry is reported and
+  skipped instead of aborting the run, capture those per-item errors through
+  an installed logger (the console still shows them), and pace entries by
+  1-2 s to avoid triggering the rate limits behind the 403/503s in the first
+  place. Entries that still ended up with no file are retried once with a
+  fresh single-video extraction (usually enough to clear an expired/throttled
+  streaming URL), and the outcome is reported honestly: partial success
+  carries `{"files", "failed", "total"}` so the history label and status say
+  "N file(s), M failed", while a total failure emits `failed` with the first
+  captured error instead of a fake success. Cancel still aborts the whole
+  run: `_CancelledError` now subclasses yt-dlp's `DownloadCancelled`, which
+  is re-raised regardless of `ignoreerrors` (a plain exception would only
+  skip to the next entry).
+
+- **YouTube downloads degraded or failed without a JavaScript runtime**
+  yt-dlp ≥ 2026.8.x deprecates extraction without one ("No supported
+  JavaScript runtime could be found"), which means missing formats and
+  heavy throttling (very slow downloads). The shared yt-dlp option builders
+  now enable all supported runtimes (deno, node, quickjs, bun), letting
+  yt-dlp use whichever is installed.
 
 - **Closing the app while a batch ran destroyed live worker threads (and left
   ffmpeg running)**

@@ -16,6 +16,16 @@ from __future__ import annotations
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
+# Enable every JS runtime yt-dlp knows about. Only "deno" is enabled by
+# default upstream, but deno is rarely installed — without one, YouTube
+# extraction falls back to the deprecated no-JS path (fewer formats,
+# heavy throttling). Enabling node/bun/quickjs too lets yt-dlp pick the
+# highest-priority runtime that is actually installed. Values are yt-dlp's
+# per-runtime config dicts; an empty dict means "find it on PATH".
+JS_RUNTIME_OPTS: dict = {
+    "js_runtimes": {"deno": {}, "node": {}, "quickjs": {}, "bun": {}},
+}
+
 
 def build_cookie_opts(
     cookie_path: str | None,
@@ -129,6 +139,7 @@ def build_format_opts(
         "quiet": True,
         "no_warnings": True,
     }
+    opts.update(JS_RUNTIME_OPTS)
     if archive_path:
         opts["download_archive"] = archive_path
 
@@ -189,6 +200,7 @@ def build_dry_opts(
         "no_warnings": True,
         "skip_download": True,
     }
+    opts.update(JS_RUNTIME_OPTS)
     opts.update(build_cookie_opts(cookie_path, cookies_from_browser))
 
     if audio_only:

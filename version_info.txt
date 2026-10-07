@@ -17,11 +17,11 @@ VSVersionInfo(
         [
           StringStruct('CompanyName',     'Chrisnov IT Solutions'),
           StringStruct('FileDescription', 'Desktop toolkit for downloading and converting media from YouTube, Vimeo, Dailymotion, Instagram, TikTok, and 1000+ sites with yt-dlp + FFmpeg'),
-          StringStruct('FileVersion',     '0.2.0-beta.4'),
+          StringStruct('FileVersion',     '0.2.0-beta.5'),
           StringStruct('InternalName',    'ChrisnovMediaToolkit'),
           StringStruct('LegalCopyright',  '\u00a9 Chrisnov IT Solutions'),
           StringStruct('ProductName',     'Chrisnov Media Toolkit'),
-          StringStruct('ProductVersion',  '0.2.0-beta.4'),
+          StringStruct('ProductVersion',  '0.2.0-beta.5'),
         ]
       ),
     ]),
