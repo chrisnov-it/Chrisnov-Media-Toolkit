@@ -5,3 +5,6 @@
 PySide6==6.11.2
 yt-dlp==2026.8.19
 curl_cffi==0.16.3
+# mutagen: embedded-tag repair (title/description sync after Clean Title) and
+# yt-dlp's preferred cover-art path for m4a/mp4 and the only path for ogg/opus.
+mutagen==1.48.1

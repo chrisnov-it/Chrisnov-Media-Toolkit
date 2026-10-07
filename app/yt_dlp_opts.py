@@ -69,12 +69,13 @@ def _thumbnail_supported(audio_only: bool, container: str) -> bool:
     """Return True if the target container reliably supports embedded cover art.
 
     Mirrors the original DownloadWorker._thumbnail_supported() method.
-    Uses the canonical container lists from constants.py; opus (audio) and
-    webm (video) are excluded since they do not reliably support thumbnail
-    embedding.
+    Uses the canonical container lists from constants.py; opus needs mutagen
+    (pinned) for Ogg cover embedding — yt-dlp's EmbedThumbnail path for
+    ogg/opus/flac raises without it — and webm (video) is excluded since it
+    does not reliably support thumbnail embedding.
     """
     if audio_only:
-        return container in {"mp3", "m4a"}
+        return container in {"mp3", "m4a", "opus"}
     return container in {"mp4", "mkv"}
 
 

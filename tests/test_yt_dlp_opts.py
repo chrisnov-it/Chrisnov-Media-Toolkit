@@ -54,7 +54,10 @@ class TestThumbnailSupported:
     def test_audio_containers(self):
         assert _thumbnail_supported(True, "mp3") is True
         assert _thumbnail_supported(True, "m4a") is True
-        assert _thumbnail_supported(True, "opus") is False
+        # opus is supported now that mutagen is pinned (Ogg cover embedding
+        # raises in yt-dlp without it)
+        assert _thumbnail_supported(True, "opus") is True
+        assert _thumbnail_supported(True, "aac") is False
 
     def test_video_containers(self):
         assert _thumbnail_supported(False, "mp4") is True
@@ -74,7 +77,7 @@ class TestExtraPostprocessors:
         assert [p["key"] for p in pps] == ["FFmpegMetadata", "EmbedThumbnail"]
 
     def test_thumbnail_skipped_for_unsupported_container(self):
-        assert _extra_postprocessors(False, True, True, "opus") == []
+        assert _extra_postprocessors(False, True, False, "webm") == []
 
     def test_nothing_when_all_disabled(self):
         assert _extra_postprocessors(False, False, False, "mp4") == []
@@ -139,8 +142,12 @@ class TestBuildFormatOpts:
         opts = _audio_opts(embed_thumbnail=True, container="mp3")
         assert opts["writethumbnail"] is True
 
-    def test_writethumbnail_skipped_for_unsupported_container(self):
+    def test_writethumbnail_enabled_for_opus_now(self):
         opts = _audio_opts(embed_thumbnail=True, container="opus")
+        assert opts["writethumbnail"] is True
+
+    def test_writethumbnail_skipped_for_unsupported_container(self):
+        opts = _audio_opts(embed_thumbnail=True, container="aac")
         assert "writethumbnail" not in opts
 
 

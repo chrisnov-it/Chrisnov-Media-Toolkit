@@ -44,6 +44,9 @@ a = Analysis(
         # app/yt_dlp_opts.py); keep it explicit so released binaries always
         # bundle it even if static analysis ever misses the guarded import.
         'curl_cffi',
+        # mutagen backs embedded-tag repair (app/tags.py, lazy import) and
+        # yt-dlp's cover-art path; same reasoning as curl_cffi above.
+        'mutagen',
         # PySide6 platform plugins
         'PySide6.QtSvg',
         'PySide6.QtSvgWidgets',

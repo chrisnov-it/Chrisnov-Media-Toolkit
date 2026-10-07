@@ -107,27 +107,48 @@ def clean_title(title: str, tags: list[str]) -> str:
 def rename_with_cleanup(path: str | Path, tags: list[str] | None) -> Path | None:
     """If `tags` is set and non-empty, rename the file with a cleaned title.
 
+    Embedded tags are always repaired afterwards (year normalization and
+    description trimming are independent of Clean Title; the title/artist
+    split only runs when *tags* is set) — see app/tags.py.
+
     Returns the new Path if renamed, else None. Collisions get a numeric suffix.
     """
-    if not tags:
-        return None
     fp = Path(path)
     if not fp.exists() or not fp.is_file():
         return None
-    new_name = clean_title(fp.stem, tags)
-    if new_name == fp.stem:
-        return None
-    new_path = fp.parent / f"{new_name}{fp.suffix}"
-    counter = 1
-    while new_path.exists() and new_path != fp:
-        new_path = fp.parent / f"{new_name} ({counter}){fp.suffix}"
-        counter += 1
-    if new_path == fp:
-        return None
     try:
-        fp.rename(new_path)
+        from .tags import sync_embedded_tags
+
+        def _sync(target: Path) -> None:
+            try:
+                sync_embedded_tags(target, tags)
+            except Exception:  # noqa: BLE001 — tag repair is best-effort
+                pass
+
+        if not tags:
+            _sync(fp)
+            return None
+        new_name = clean_title(fp.stem, tags)
+        if new_name == fp.stem:
+            # Filename is already clean, but the embedded tags may still need
+            # repair (year/description/title) — fix tags without renaming.
+            _sync(fp)
+            return None
+        new_path = fp.parent / f"{new_name}{fp.suffix}"
+        counter = 1
+        while new_path.exists() and new_path != fp:
+            new_path = fp.parent / f"{new_name} ({counter}){fp.suffix}"
+            counter += 1
+        if new_path == fp:
+            _sync(fp)
+            return None
+        try:
+            fp.rename(new_path)
+        except OSError:
+            return None
+        _sync(new_path)
         return new_path
-    except OSError:
+    except Exception:  # noqa: BLE001 — tag repair import/call is best-effort
         return None
 
 
