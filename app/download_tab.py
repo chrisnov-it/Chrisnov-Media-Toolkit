@@ -1018,15 +1018,16 @@ class DownloadTab(QWidget):
         completed = False   # a history entry was written for a real on-disk file
         row_status = "done" # icon shown on the queue row
         missing_note: str | None = None
+        playlist_failed = 0 # playlist items the worker could not download
         try:
             if isinstance(path, str) and path.startswith(("playlist_files:", "playlist:")):
                 # Playlist batches: collect the final paths (post-rename when
                 # cleaning ran, original otherwise) and build a readable history
                 # label instead of the raw worker payload.
                 if path.startswith("playlist_files:"):
-                    playlist_files, playlist_label, renamed = self._collect_playlist_files(path, batch)
+                    playlist_files, playlist_label, renamed, playlist_failed = self._collect_playlist_files(path, batch)
                 else:
-                    playlist_files, playlist_label, renamed = self._discover_playlist_files(path, batch)
+                    playlist_files, playlist_label, renamed, playlist_failed = self._discover_playlist_files(path, batch)
                 total_bytes = sum(self._size_of(f) for f in playlist_files)
                 self._history.append(
                     url=url, filepath=batch.outdir, filename=playlist_label,
@@ -1072,6 +1073,17 @@ class DownloadTab(QWidget):
                 self.status_label.setText(
                     f"Cleaned {len(renamed)} file(s), e.g. {renamed[0]!r}"
                 )
+            if playlist_failed:
+                # Partial playlist success: the queue row says "done" (files
+                # were saved), so say out loud how many items did not make it.
+                got = len(playlist_files)
+                summary = (
+                    f"Downloaded {got} of {got + playlist_failed} playlist "
+                    f"item(s) — {playlist_failed} failed"
+                )
+                if renamed:
+                    summary += f", {len(renamed)} cleaned"
+                self.status_label.setText(f"[{batch.idx + 1}/{batch.total}] {summary}")
             if missing_note is not None:
                 self.status_label.setText(missing_note)
             self._mark_queue_item(batch.idx, row_status)
@@ -1100,29 +1112,48 @@ class DownloadTab(QWidget):
             return 0
 
     def _collect_playlist_files(self, payload: str, batch: BatchState
-                                ) -> tuple[list[Path], str, list[str]]:
-        """Rename every file in a playlist_files: JSON payload (single worker
-        run that itself collected all output files)."""
+                                ) -> tuple[list[Path], str, list[str], int]:
+        """Rename every file in a playlist_files: payload (single worker
+        run that itself collected all output files) and report how many
+        playlist items failed.
+
+        A resilient playlist run sends ``{"files": [...], "failed": n,
+        "total": n}`` so partial success stays visible; a plain JSON list
+        (what older workers and history rows carry) is also accepted.
+        Returns (files, label, renamed, failed_count)."""
         try:
             raw = json.loads(payload.removeprefix("playlist_files:"))
         except json.JSONDecodeError:
-            raw = []
-        if not isinstance(raw, list):
-            raw = []
+            raw = None
+        if isinstance(raw, dict):
+            raw_files = raw.get("files")
+            try:
+                failed = int(raw.get("failed") or 0)
+            except (TypeError, ValueError):
+                failed = 0
+        else:
+            raw_files = raw
+            failed = 0
+        if not isinstance(raw_files, list):
+            raw_files = []
         files: list[Path] = []
         renamed: list[str] = []
-        for p in raw:
+        for p in raw_files:
             new = rename_with_cleanup(p, batch.clean_tags)
             files.append(new if new is not None else Path(p))
             if new is not None:
                 renamed.append(new.name)
         label = f"Playlist — {len(files)} file(s)"
-        return files, label, renamed
+        if failed:
+            label += f", {failed} failed"
+        return files, label, renamed, failed
 
     def _discover_playlist_files(self, payload: str, batch: BatchState
-                                 ) -> tuple[list[Path], str, list[str]]:
+                                 ) -> tuple[list[Path], str, list[str], int]:
         """playlist:N:Title payload — discover files the worker wrote since
-        the batch started (used when the worker could not collect paths)."""
+        the batch started (used when the worker could not collect paths).
+        Returns (files, label, renamed, failed_count) — never a failed
+        count: nothing is known about individual items here."""
         exts = audio_extensions() if batch.audio_only else video_extensions()
         files: list[Path] = []
         renamed: list[str] = []
@@ -1137,7 +1168,7 @@ class DownloadTab(QWidget):
         label = (
             f"Playlist: {title} — {n} item(s)" if title else f"Playlist — {n} item(s)"
         )
-        return files, label, renamed
+        return files, label, renamed, 0
 
     def _finish_single_file(self, path: str, batch: BatchState) -> tuple[Path, list[str]]:
         """Rename a single downloaded file when cleanup is enabled."""
