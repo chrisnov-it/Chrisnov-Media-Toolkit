@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 from collections.abc import Iterable
 from pathlib import Path
 
@@ -39,6 +40,23 @@ def clip_text(text: str, max_len: int) -> str:
     if max_len <= 1:
         return "…"
     return text[: max_len - 1] + "…"
+
+
+# Matches ANSI/X3.64 terminal escapes (color/weight SGR, cursor, ...).
+_ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
+
+
+def strip_ansi(text: str) -> str:
+    """Remove ANSI escape sequences from *text*.
+
+    yt-dlp's error strings carry color/weight codes when its stderr is a tty;
+    stored in history or shown in the status line they degrade to garbage like
+    ``[1mERROR:[10m``. Display sites route through this so both new and
+    legacy (already stored raw) error text renders cleanly.
+    """
+    if not text:
+        return text
+    return _ANSI_RE.sub("", text)
 
 
 def set_controls_busy(controls: Iterable[QWidget], busy: bool) -> None:

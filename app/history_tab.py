@@ -31,7 +31,7 @@ from PySide6.QtWidgets import (
 from .history import DownloadHistory
 from .icon import queue_status_icon
 from .theme import _base_font_points, small_font_size, tiny_font_size
-from .utils import install_placeholder, open_in_explorer
+from .utils import install_placeholder, open_in_explorer, strip_ansi
 
 
 def _fmt_size(n: int) -> str:
@@ -240,7 +240,7 @@ class HistoryTab(QWidget):
             # Failed entries carry their reason: show it inline (the list
             # word-wraps) and in the tooltip, since the queue row that
             # originally held the error resets with the batch.
-            error = (entry.get("error") or "").strip()
+            error = strip_ansi(entry.get("error") or "").strip()
             if error and not completed:
                 item.setText(f"{display}  —  {error}")
                 item.setToolTip(error)

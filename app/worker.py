@@ -169,7 +169,9 @@ class DownloadWorker(CancellableWorker):
             pass  # clean cancel — no error signal
         except Exception as e:  # noqa: BLE001 — run() boundary: report any failure
             if not self._cancelled:
-                self.failed.emit(str(e))
+                # DownloadError messages carry ANSI color codes when yt-dlp's
+                # stderr was a tty — history/status display must stay clean.
+                self.failed.emit(remove_terminal_sequences(str(e)))
 
     def _hook(self, d: dict) -> None:
         if self._cancelled:
@@ -428,7 +430,7 @@ class PlaylistInspectWorker(CancellableWorker):
                     info = ydl.extract_info(p_url, download=False)
             except Exception as exc:  # noqa: BLE001 — report fetch failure per URL
                 if not self._cancelled:
-                    self.error.emit(p_url, str(exc))
+                    self.error.emit(p_url, remove_terminal_sequences(str(exc)))
                 return
             if self._cancelled:
                 return
@@ -507,4 +509,4 @@ class FileSizeWorker(CancellableWorker):
 
         except Exception as exc:  # noqa: BLE001 — run() boundary: report any failure
             if not self._cancelled:
-                self.error.emit(str(exc))
+                self.error.emit(remove_terminal_sequences(str(exc)))

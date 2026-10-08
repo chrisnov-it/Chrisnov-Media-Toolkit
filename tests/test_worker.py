@@ -507,3 +507,18 @@ class TestSingleVideoRun:
 
         assert oks == []
         assert fails == ["network down"]
+
+    def test_failure_message_is_ansi_stripped(self, monkeypatch, tmp_path):
+        """yt-dlp colors DownloadError messages when stderr was a tty —
+        the history label and status line must not show '[1m...' garbage."""
+        monkeypatch.setattr(
+            "app.worker.YoutubeDL",
+            _fake_ydl(RuntimeError("\x1b[1m\x1b[31mERROR:\x1b[0m forbidden")),
+        )
+        w = _download_worker(tmp_path, playlist=False)
+        fails: list[str] = []
+        w.failed.connect(fails.append)
+
+        w.run()
+
+        assert fails == ["ERROR: forbidden"]

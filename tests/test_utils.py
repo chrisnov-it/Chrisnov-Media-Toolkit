@@ -10,6 +10,7 @@ from app.utils import (
     open_result,
     scan_media_files,
     set_controls_busy,
+    strip_ansi,
 )
 
 
@@ -212,3 +213,25 @@ class TestOpenResult:
         assert open_result(tmp_path / "vanished.mp3") is False
         assert open_result("") is False
         assert calls == []
+
+class TestStripAnsi:
+    """Error strings from yt-dlp keep their tty color codes unless stripped;
+    the History row/tooltip displays what the model stored, and legacy rows
+    hold raw escapes already — both must render cleanly."""
+
+    def test_strips_color_and_weight_codes(self):
+        raw = "\x1b[1m\x1b[31mERROR:\x1b[0m\x1b[10m unable to download video data"
+        assert strip_ansi(raw) == "ERROR: unable to download video data"
+
+    def test_strips_cursor_and_misc_sequences(self):
+        raw = "\x1b[2K\x1b[31m[download] Destination: x.mp3\x1b[0m"
+        assert strip_ansi(raw) == "[download] Destination: x.mp3"
+
+    def test_plain_text_with_brackets_is_untouched(self):
+        # A failed thumbnail slot shows like "[ 20%]" in the wild — without
+        # the ESC prefix it must NOT be eaten by a naive "[...]" pattern.
+        assert strip_ansi("format [1080p] failed at [42]") == "format [1080p] failed at [42]"
+
+    def test_empty_and_none_safe(self):
+        assert strip_ansi("") == ""
+        assert strip_ansi(None) is None
