@@ -13,6 +13,7 @@ Extracted from the MainWindow monolith (window.py) with behavior kept
 from __future__ import annotations
 
 import contextlib
+import html
 import json
 import logging
 import time
@@ -59,6 +60,7 @@ from .constants import (
     VIDEO_CONTAINERS,
 )
 from .history import DownloadHistory
+from .http_api import LocalApiServer, make_token
 from .icon import bundled_icon, mark_status, palette_icon_color
 from .progress import EtaEstimator
 from .settings import AppSettings
@@ -124,6 +126,8 @@ class DownloadTab(QWidget):
     #: window title (a finished batch used to leave no trace anywhere).
     batch_started = Signal()
     batch_finished = Signal(int, int)  # done, total
+    #: Live progress (0-100) for the window title.
+    progress_changed = Signal(int)
 
     def __init__(self, settings: AppSettings, history: DownloadHistory,
                  parent: QWidget | None = None) -> None:
@@ -150,6 +154,12 @@ class DownloadTab(QWidget):
         # private, etc.)
         self.cookie_path = settings.get_str("cookie_path", "")
         self.cookies_from_browser = settings.get_bool("cookies_from_browser", False)
+
+        # Optional localhost helper API for browser extensions.
+        self._api_token = settings.get_str("api_token", "") or make_token()
+        if not settings.get_str("api_token", ""):
+            settings.set_value("api_token", self._api_token)
+        self._api_server: LocalApiServer | None = None
 
         self._build_ui()
 
@@ -246,25 +256,21 @@ class DownloadTab(QWidget):
         self.clean_chk.setChecked(True)
         self.clean_chk.toggled.connect(self._on_clean_toggled)
         chk_row.addWidget(self.clean_chk)
-        chk_row.addStretch()
-        root.addLayout(chk_row)
-
-        chk_row2 = QHBoxLayout()
         self.embed_meta_chk = QCheckBox("Embed metadata")
         self.embed_meta_chk.setToolTip("Write title, artist, and other tags into the file")
-        # Default: unchecked (matches the default video mode; auto-enabled when
-        # the user checks "Audio only" via _on_audio_toggled)
-        self.embed_meta_chk.setChecked(False)
-        chk_row2.addWidget(self.embed_meta_chk)
+        # Default on: video files can carry metadata too (title/artist/...),
+        # not just audio. The toggle below keeps it on when switching modes.
+        self.embed_meta_chk.setChecked(True)
+        chk_row.addWidget(self.embed_meta_chk)
         self.embed_thumb_chk = QCheckBox("Embed thumbnail")
         self.embed_thumb_chk.setToolTip(
             "Embed cover art. Works with mp3/m4a (audio) and mp4/mkv (video)."
         )
-        chk_row2.addWidget(self.embed_thumb_chk)
-        chk_row2.addStretch()
-        root.addLayout(chk_row2)
+        chk_row.addWidget(self.embed_thumb_chk)
+        chk_row.addStretch()
+        root.addLayout(chk_row)
 
-        # Cookie settings row (for Instagram private, Vimeo private, etc.)
+        # Cookie + browser helper row (for Instagram private, Vimeo private, etc.)
         cookie_row = QHBoxLayout()
         self.cookies_browser_chk = QCheckBox("Use browser cookies")
         self.cookies_browser_chk.setToolTip(
@@ -289,6 +295,25 @@ class DownloadTab(QWidget):
             "color: palette(text);" if not self.cookie_path else ""
         )
         cookie_row.addWidget(self.cookie_path_label)
+
+        self.browser_helper_chk = QCheckBox("Browser helper (experimental)")
+        self.browser_helper_chk.setToolTip(
+            "Enable a local-only HTTP endpoint that the companion browser "
+            "extension uses to queue URLs. Token required."
+        )
+        self.browser_helper_chk.toggled.connect(self._toggle_browser_helper)
+        cookie_row.addWidget(self.browser_helper_chk)
+
+        self.browser_helper_status = QLabel("Disabled")
+        cookie_row.addWidget(self.browser_helper_status)
+
+        self.browser_helper_copy_btn = QPushButton("Copy token")
+        self.browser_helper_copy_btn.setToolTip(
+            "Copy the helper token to the clipboard"
+        )
+        self.browser_helper_copy_btn.clicked.connect(self._copy_browser_helper_token)
+        cookie_row.addWidget(self.browser_helper_copy_btn)
+
         cookie_row.addStretch()
         root.addLayout(cookie_row)
 
@@ -355,7 +380,14 @@ class DownloadTab(QWidget):
         out_row.addWidget(self.open_dir_btn)
         root.addLayout(out_row)
 
-        # Info box (hidden by default, shown after Info button click)
+        # Info box (hidden by default, shown after Info button click). Wrapped
+        # in a container with a close button so it can be dismissed without
+        # waiting for the next download — a persistent info panel used to push
+        # the progress bar and status line down the page.
+        self.info_container = QWidget()
+        info_layout = QHBoxLayout(self.info_container)
+        info_layout.setContentsMargins(0, 0, 0, 0)
+        info_layout.setSpacing(4)
         self.info_box = QLabel("")
         self.info_box.setWordWrap(True)
         self.info_box.setTextInteractionFlags(
@@ -366,8 +398,14 @@ class DownloadTab(QWidget):
             "border-radius: 4px; padding: 4px 8px; font-size: "
             + _font_size() + "; color: palette(windowText);"
         )
-        self.info_box.hide()
-        root.addWidget(self.info_box)
+        info_layout.addWidget(self.info_box, 1)
+        self.info_close_btn = QPushButton("×")
+        self.info_close_btn.setFixedWidth(24)
+        self.info_close_btn.setToolTip("Dismiss this info panel")
+        self.info_close_btn.clicked.connect(self.info_container.hide)
+        info_layout.addWidget(self.info_close_btn)
+        self.info_container.hide()
+        root.addWidget(self.info_container)
 
         # Start / Cancel + Progress + Status
         btn_row = QHBoxLayout()
@@ -435,6 +473,7 @@ class DownloadTab(QWidget):
             self.audio_only_chk, self.skip_dup_chk, self.clean_chk,
             self.embed_meta_chk, self.embed_thumb_chk,
             self.cookies_browser_chk, self.cookie_path_btn,
+            self.browser_helper_chk, self.browser_helper_copy_btn,
             self.clean_tags_input, self.res_combo, self.container_combo,
             self.bitrate_combo, self.dir_input, self.browse_btn,
         )
@@ -642,10 +681,11 @@ class DownloadTab(QWidget):
             self._settings.save_dir(key, d)
 
     def _on_audio_toggled(self, checked: bool) -> None:
-        # Audio mode benefits from metadata embedding (ID3 tags) so the user
-        # doesn't have to manually edit tags later. Video files don't need it,
-        # so we toggle the checkbox to match the mode.
-        self.embed_meta_chk.setChecked(checked)
+        # Metadata embedding is useful for both audio and video files. Audio
+        # mode turns it on (ID3/cover art); video mode leaves the user's
+        # choice untouched instead of silently disabling it.
+        if checked:
+            self.embed_meta_chk.setChecked(True)
         # Remember whatever folder is currently shown for the mode we're leaving,
         # then restore the saved folder for the mode we're entering.
         current = self.dir_input.text().strip()
@@ -699,6 +739,32 @@ class DownloadTab(QWidget):
             # The label clips long paths — hover must show the chosen one.
             self.cookie_path_label.setToolTip(d)
             self.cookie_path_label.setStyleSheet("")
+
+    # ------------------------------------------------------------------ #
+    #  Browser helper (localhost API)                                      #
+    # ------------------------------------------------------------------ #
+    def _toggle_browser_helper(self, checked: bool) -> None:
+        if checked:
+            if self._api_server is None:
+                self._api_server = LocalApiServer(self._api_token)
+                self._api_server.url_received.connect(self.add_url)
+                self._api_server.status_changed.connect(
+                    self.browser_helper_status.setText
+                )
+                self._tracker.track(self._api_server)
+                self._api_server.start()
+        else:
+            if self._api_server is not None:
+                self._api_server.stop()
+                self._api_server.wait(2000)
+                self._api_server = None
+            self.browser_helper_status.setText("Disabled")
+
+    def _copy_browser_helper_token(self) -> None:
+        from PySide6.QtWidgets import QApplication as _QApp
+
+        _QApp.clipboard().setText(self._api_token)
+        self.browser_helper_status.setText("Token copied to clipboard")
 
     # ------------------------------------------------------------------ #
     #  Info fetch (FileSizeWorker)                                         #
@@ -761,19 +827,19 @@ class DownloadTab(QWidget):
 
         size_str = f"{filesize_mb:.1f} MB" if filesize_mb else "unknown"
 
-        msg = f"<b>{title}</b><br>"
+        msg = f"<b>{html.escape(title)}</b><br>"
         if mins:
             msg += f"Length: {mins} &nbsp;|&nbsp; "
-        msg += f"Format: {fmt_note} &nbsp;|&nbsp; "
+        msg += f"Format: {html.escape(fmt_note)} &nbsp;|&nbsp; "
         msg += f"Est. size: <b>{size_str}</b>"
 
         if audio:
-            msg += f"<br><i>Audio-only mode. Resolution: {resolution}</i>"
+            msg += f"<br><i>Audio-only mode. Resolution: {html.escape(resolution)}</i>"
         else:
-            msg += f"<br><i>Video mode. Resolution: {resolution}</i>"
+            msg += f"<br><i>Video mode. Resolution: {html.escape(resolution)}</i>"
 
         self.info_box.setText(msg)
-        self.info_box.show()
+        self.info_container.show()
 
     def _on_info_error(self, err: str) -> None:
         self._info_worker = None
@@ -785,9 +851,9 @@ class DownloadTab(QWidget):
         # body text in the info box, and #a62929 keeps AA contrast on the
         # light background while #e53e3e is the status *mark* red.
         self.info_box.setText(
-            f"<span style='color:#a62929;'>Error: {err}</span>"
+            f"<span style='color:#a62929;'>Error: {html.escape(err)}</span>"
         )
-        self.info_box.show()
+        self.info_container.show()
 
     # ------------------------------------------------------------------ #
     #  Download flow                                                       #
@@ -855,6 +921,9 @@ class DownloadTab(QWidget):
         # still fire on disabled widgets).
         self._set_batch_busy(True)
         self.cancel_btn.setEnabled(True)
+        # Drop the info panel so it does not push the progress bar out of view
+        # while the batch is running.
+        self.info_container.hide()
 
         playlist_urls = [u for u in batch.urls if self._is_playlist_url(u)]
         if playlist_urls:
@@ -996,6 +1065,7 @@ class DownloadTab(QWidget):
         displayed string actually changes (yt-dlp progress emits fast).
         """
         self.dl_progress.setValue(pct)
+        self.progress_changed.emit(pct)
         eta = self._eta.update(pct)
         fmt = (
             f"{self._eta_label} • ETA {eta}" if eta is not None
@@ -1261,6 +1331,10 @@ class DownloadTab(QWidget):
 
     def shutdown(self) -> None:
         """Cancel every worker when the window closes (idempotent)."""
+        if self._api_server is not None:
+            self._api_server.stop()
+            self._api_server.wait(2000)
+            self._api_server = None
         info = self._info_worker
         if info is not None:
             self._disconnect_signals(info, "result", "error")

@@ -134,6 +134,9 @@ Convert local videos to **mp4, mkv, or webm**. Quality presets: **Keep quality /
 ### Drag & drop
 Drop a URL, some text, or a `.txt` file of URLs (one per line) onto the window to add them to the queue. Lines starting with `#` are ignored.
 
+### Browser helper (experimental, developer-only)
+Enable **Browser helper (experimental)** in the Downloader tab, then copy the token and paste it into the companion Firefox extension (`browser-extension/` folder, load as a temporary add-on). Right-click any link/page → **Download with Chrisnov Media Toolkit** to queue it in the app. Everything stays on 127.0.0.1. This feature is experimental and intended for developers; it may change or be removed.
+
 ### Where files are saved
 The app remembers the last output folder you chose for each mode. The defaults are `~/Videos` (video) and `~/Music` (audio). Click **Open** next to **Browse** to jump straight to that folder.
 

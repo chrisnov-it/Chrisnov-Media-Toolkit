@@ -165,12 +165,37 @@ def plan_tag_repairs(
             split = split_artist_title(new)
             if split:
                 artist, new = split          # split returns (artist, song)
-                plan.extend(_plan_artist(tags, key, artist))
+                plan.extend(_plan_artist(tags, key, artist, clean_tags))
             if new and new != old:
                 plan.append((key, value, new))
             break  # first title key found is the one to use
     except Exception:
         log.debug("plan_tag_repairs: title failed for %s", path, exc_info=True)
+
+    # --- artist: strip fluff (Official/Topic/...) from channel names ----------
+    # Only when the title block above did not already repair the artist (it
+    # cleans an existing artist there, or creates one from "Artist - Song").
+    try:
+        already = {str(p[0]) for p in plan}
+        if not (already & {str(k) for k in _ARTIST_KEYS}):
+            for key in _ARTIST_KEYS:
+                try:
+                    value = tags[key]
+                except (KeyError, TypeError):
+                    continue
+                old = _frame_text(value).strip()
+                if not old:
+                    break
+                from .cleaner import DEFAULT_CLEAN_TAGS, clean_title
+
+                tags_to_use = clean_tags if clean_tags else DEFAULT_CLEAN_TAGS
+                new = clean_title(old, tags_to_use)
+                if new and new != old:
+                    plan.append((key, value, new))
+                break
+    except Exception:
+        log.debug("plan_tag_repairs: artist cleanup failed for %s", path,
+                  exc_info=True)
 
     # --- date: collapse 20261001 -> 2026 -----------------------------------
     try:
@@ -223,20 +248,31 @@ def plan_tag_repairs(
     return plan
 
 
-def _plan_artist(tags: object, title_key: object, artist: str
+def _plan_artist(tags: object, title_key: object, artist: str,
+                 clean_tags: list[str] | None = None
                  ) -> list[tuple[object, object, str | None]]:
     """Plan writing *artist* when the artist tag is missing or empty.
 
-    Never overwrites a real artist value. Creates the correct key for the
-    container (ID3 TPE1 frame, MP4 ©ART, vorbis comment) when absent —
-    ``value`` of None means "create this key" for the writer.
+    Never overwrites a real artist value with a different one, but it does
+    clean an existing value of fluff such as "Official"/"Topic" that the
+    source channel name carried. Creates the correct key for the container
+    (ID3 TPE1 frame, MP4 ©ART, vorbis comment) when absent — ``value`` of
+    None means "create this key" for the writer.
     """
+    from .cleaner import DEFAULT_CLEAN_TAGS, clean_title
+
+    tags_to_use = clean_tags if clean_tags else DEFAULT_CLEAN_TAGS
+
     for key in _ARTIST_KEYS:
         try:
             value = tags[key]
         except (KeyError, TypeError):
             continue
-        if _frame_text(value).strip():
+        text = _frame_text(value).strip()
+        if text:
+            cleaned = clean_title(text, tags_to_use)
+            if cleaned and cleaned != text:
+                return [(key, value, cleaned)]
             return []             # a real artist is already there
         return [(key, value, artist)]
 

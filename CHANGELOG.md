@@ -6,7 +6,59 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
-## [0.2.0-beta.5] — 2026-10-07
+## [0.2.0-beta.6] - 2026-10-19
+
+### Added
+
+- **Browser helper (optional)**
+  Localhost-only HTTP endpoint + Firefox companion extension
+  (`browser-extension/`) to queue URLs from the browser. Token-protected,
+  binds to 127.0.0.1.
+
+- **UI/UX improvements**
+  - Tags button in converter file lists (in addition to the right-click menu).
+  - History filter by status (All/Completed/Failed).
+  - Tab tooltips and live progress in the window title during a batch.
+  - Status-line notice when an output filename is suffixed to avoid overwrite.
+  - Global shortcuts: Ctrl+L (focus URL input), Ctrl+O (open active output folder).
+
+- **Manual tag editing in both converter tabs**
+  Right-click a queued file in Audio/Video Converter → "Edit tags…" to set
+  Title/Artist/Album/Year before conversion. Values are prefilled from the
+  source file's metadata (mutagen) and override only the fields that are
+  filled in; the rest keeps the source metadata. Overrides are per-file and
+  cleared with the queue.
+
+- **Right-click menu in the History tab**
+  Open the file/folder, re-download an entry (including successful ones),
+  or remove a single entry — independent of the double-click action.
+
+- **Unified embed-metadata default for downloads**
+  Embed metadata now defaults to on in both audio and video modes, and
+  switching modes no longer silently disables it.
+
+- **Dismissible info panel**
+  The download Info panel now has a close button and auto-hides when a
+  batch starts, so it no longer pushes the progress bar out of view.
+
+### Changed
+
+- **Filename cleanup** (`app/cleaner.py`)
+  A lone pipe left in the middle of a title (e.g. "Song | Artist" with no
+  trailing tag) is now rendered as " - " instead of leaving a stray "|".
+  Added the bare "Official" tag to the default list.
+
+- **Embedded artist tag** (`app/tags.py`)
+  Channel names carrying fluff such as "Official"/"Topic" are now cleaned
+  from the artist tag as well, independent of the Clean Title option.
+
+- **Security hardening** (`app/download_tab.py`)
+  Video titles / errors shown in the Info box are HTML-escaped.
+
+- **Layout cleanup** in the Downloader tab: checkboxes aligned, cookie/helper
+  controls grouped consistently.
+
+## [0.2.0-beta.5] - 2026-10-07
 
 ### Added
 

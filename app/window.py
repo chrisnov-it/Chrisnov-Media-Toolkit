@@ -64,6 +64,7 @@ from .theme import (
     with_aa_placeholder,
 )
 from .update_check import UpdateCheckWorker
+from .utils import open_in_explorer
 from .video_convert_tab import VideoConvertTab
 from .worker_tracking import WorkerTracker
 
@@ -149,6 +150,7 @@ class MainWindow(QWidget):
         for tab in (self.download_tab, self.audio_tab, self.video_tab):
             tab.batch_started.connect(self._on_batch_started)
             tab.batch_finished.connect(self._on_batch_finished)
+            tab.progress_changed.connect(self._on_batch_progress)
 
         # AA-compliant placeholder text for every QLineEdit in the window.
         # Set on the window (not the app) so children inherit it and the
@@ -179,6 +181,11 @@ class MainWindow(QWidget):
         """
         self.setWindowTitle(f"✓ Done ({done}/{total}) — {self._base_title}")
         QApplication.alert(self, 5000)
+
+    def _on_batch_progress(self, pct: int) -> None:
+        """Reflect live progress in the window title while a batch runs."""
+        if any(t.is_active for t in (self.download_tab, self.audio_tab, self.video_tab)):
+            self.setWindowTitle(f"{pct}% — {self._base_title}")
 
     # ------------------------------------------------------------------ #
     #  Theme change handling                                                #
@@ -405,6 +412,21 @@ class MainWindow(QWidget):
         self._tabs.setCurrentIndex(0)
         self.download_tab.requeue(url, filename)
 
+    def _shortcut_focus_url(self) -> None:
+        self._tabs.setCurrentIndex(0)
+        self.download_tab.url_input.setFocus()
+
+    def _shortcut_open_output(self) -> None:
+        tab = self._tabs.currentIndex()
+        path = ""
+        if tab == 0:
+            path = self.download_tab.dir_input.text().strip()
+        elif tab == 1:
+            path = self.audio_tab.conv_dir_input.text().strip()
+        elif tab == 2:
+            path = self.video_tab.video_conv_dir_input.text().strip()
+        open_in_explorer(path)
+
     def _show_downloader_after_queue(self) -> None:
         """Dropped/pasted URLs land in the Downloader's queue — go look at it.
 
@@ -459,11 +481,24 @@ class MainWindow(QWidget):
         self._tabs.addTab(self._wrap_tab(self.audio_tab), "Audio Converter")
         self._tabs.addTab(self._wrap_tab(self.video_tab), "Video Converter")
         self._tabs.addTab(self._wrap_tab(self.history_tab), "History")
+        for i, tip in enumerate(
+            ("Downloader tab", "Audio Converter tab",
+             "Video Converter tab", "History tab")
+        ):
+            self._tabs.setTabToolTip(i, tip)
         self._refresh_tab_icons()
         root.addWidget(self._tabs)
 
         # F1 opens the About dialog from anywhere in the app
         QShortcut(QKeySequence("F1"), self).activated.connect(self._show_about)
+        # Ctrl+L focuses the URL input (Downloader tab)
+        QShortcut(QKeySequence("Ctrl+L"), self).activated.connect(
+            self._shortcut_focus_url
+        )
+        # Ctrl+O opens the active tab's output folder
+        QShortcut(QKeySequence("Ctrl+O"), self).activated.connect(
+            self._shortcut_open_output
+        )
 
     def _wrap_tab(self, widget: QWidget) -> QScrollArea:
         scroll = QScrollArea()

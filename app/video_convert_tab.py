@@ -17,13 +17,17 @@ from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
     QComboBox,
+    QDialog,
+    QDialogButtonBox,
     QFileDialog,
+    QFormLayout,
     QGridLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QListWidget,
     QListWidgetItem,
+    QMenu,
     QMessageBox,
     QProgressBar,
     QPushButton,
@@ -67,6 +71,8 @@ class VideoConvertTab(QWidget):
     #: window title (same contract as DownloadTab).
     batch_started = Signal()
     batch_finished = Signal(int, int)  # done, total
+    #: Live progress (0-100) for the window title.
+    progress_changed = Signal(int)
 
     def __init__(self, settings: AppSettings,
                  tags_provider: Callable[[], str],
@@ -78,6 +84,7 @@ class VideoConvertTab(QWidget):
         self._history = history
         self._tracker = WorkerTracker()
         self._video_conv_files: list[Path] = []
+        self._video_conv_tags: dict[Path, dict[str, str]] = {}
         self._video_conv_worker: VideoConvertWorker | None = None
         self._video_conv_queue: list[Path] = []
         self._video_conv_idx = 0
@@ -132,6 +139,12 @@ class VideoConvertTab(QWidget):
         self.video_conv_file_list.setSelectionMode(
             QAbstractItemView.SelectionMode.ExtendedSelection
         )
+        self.video_conv_file_list.setContextMenuPolicy(
+            Qt.ContextMenuPolicy.CustomContextMenu
+        )
+        self.video_conv_file_list.customContextMenuRequested.connect(
+            self._video_conv_context_menu
+        )
         root.addWidget(self.video_conv_file_list, 1)
 
         # Empty-state placeholder rendered *inside* the list box (P2) —
@@ -150,10 +163,18 @@ class VideoConvertTab(QWidget):
         self.video_conv_remove_btn.clicked.connect(self._video_conv_remove_selected)
         self.video_conv_clear_btn = QPushButton("Clear")
         self.video_conv_clear_btn.clicked.connect(self._video_conv_clear_files)
+        self.video_conv_tags_btn = QPushButton("Tags…")
+        self.video_conv_tags_btn.setToolTip(
+            "Edit Title/Artist/Album/Year for the selected file"
+        )
+        self.video_conv_tags_btn.clicked.connect(
+            self._video_conv_edit_tags_selected
+        )
         fbtn_row.addWidget(self.video_conv_add_files_btn)
         fbtn_row.addWidget(self.video_conv_add_folder_btn)
         fbtn_row.addWidget(self.video_conv_remove_btn)
         fbtn_row.addWidget(self.video_conv_clear_btn)
+        fbtn_row.addWidget(self.video_conv_tags_btn)
         fbtn_row.addStretch()
         root.addLayout(fbtn_row)
 
@@ -329,6 +350,115 @@ class VideoConvertTab(QWidget):
         self.video_conv_status_label.setText(msg)
         return added
 
+    def _video_conv_context_menu(self, pos) -> None:
+        if self._video_conv_active:
+            return
+        item = self.video_conv_file_list.itemAt(pos)
+        if item is None:
+            return
+        row = self.video_conv_file_list.row(item)
+        if not (0 <= row < len(self._video_conv_files)):
+            return
+        path = self._video_conv_files[row]
+        menu = QMenu(self)
+        act = menu.addAction("Edit tags…")
+        act.triggered.connect(
+            lambda checked=False, p=path: self._edit_video_tags(p)
+        )
+        menu.exec(self.video_conv_file_list.viewport().mapToGlobal(pos))
+
+    def _probe_source_tags(self, path: Path) -> dict[str, str]:
+        out: dict[str, str] = {}
+        try:
+            import mutagen
+            audio = mutagen.File(path)
+        except Exception:  # noqa: BLE001
+            return out
+        if audio is None or audio.tags is None:
+            return out
+        tags = audio.tags
+
+        def _get(keys: tuple[str, ...]) -> str:
+            for key in keys:
+                try:
+                    value = tags[key]
+                except (KeyError, TypeError):
+                    continue
+                frame_text = getattr(value, "text", None)
+                if isinstance(frame_text, list) and frame_text:
+                    text = str(frame_text[0])
+                elif isinstance(frame_text, str):
+                    text = frame_text
+                else:
+                    text = str(value)
+                text = text.strip()
+                if text:
+                    return text
+            return ""
+
+        out["title"] = _get(("title", "TITLE", "Title", "TIT2", "\xa9nam"))
+        out["artist"] = _get(("artist", "ARTIST", "Artist", "TPE1", "\xa9ART"))
+        out["album"] = _get(("album", "ALBUM", "Album", "TALB", "\xa9alb"))
+        raw_year = _get(("date", "DATE", "Date", "TDRC", "TYER", "\xa9day", "year"))
+        if len(raw_year) == 8 and raw_year.isdigit():
+            raw_year = raw_year[:4]
+        out["year"] = raw_year
+        return out
+
+    def _edit_video_tags(self, path: Path) -> None:
+        dialog = QDialog(self)
+        dialog.setWindowTitle(f"Edit tags — {path.name}")
+        dialog.setFixedWidth(360)
+        form = QFormLayout(dialog)
+
+        existing = self._probe_source_tags(path)
+        override = self._video_conv_tags.get(path, {})
+        for key in ("title", "artist", "album", "year"):
+            if key in override:
+                existing[key] = override[key]
+
+        edits: dict[str, QLineEdit] = {}
+        for label, key in (("Title", "title"), ("Artist", "artist"),
+                           ("Album", "album"), ("Year", "year")):
+            edit = QLineEdit(existing.get(key, ""))
+            edits[key] = edit
+            form.addRow(label + ":", edit)
+
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok
+            | QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        form.addRow(buttons)
+
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+
+        values = {k: edits[k].text().strip() for k in edits}
+        if any(values.values()):
+            self._video_conv_tags[path] = values
+            row = (self._video_conv_files.index(path)
+                   if path in self._video_conv_files else -1)
+            if row >= 0:
+                item = self.video_conv_file_list.item(row)
+                if item is not None:
+                    item.setToolTip(
+                        str(path) + "\nManual tags: "
+                        + ", ".join(f"{k}={v}" for k, v in values.items() if v)
+                    )
+        else:
+            self._video_conv_tags.pop(path, None)
+
+    def _video_conv_edit_tags_selected(self) -> None:
+        if self._video_conv_active or not self._video_conv_files:
+            return
+        sel = self.video_conv_file_list.selectedItems()
+        row = (self.video_conv_file_list.row(sel[0])
+               if sel else 0)
+        if 0 <= row < len(self._video_conv_files):
+            self._edit_video_tags(self._video_conv_files[row])
+
     def _video_conv_browse_files(self) -> None:
         exts = " ".join(f"*.{e}" for e in sorted(VIDEO_INPUT_EXTENSIONS))
         paths, _ = QFileDialog.getOpenFileNames(
@@ -354,7 +484,8 @@ class VideoConvertTab(QWidget):
         )
         for row in rows:
             if 0 <= row < len(self._video_conv_files):
-                self._video_conv_files.pop(row)
+                removed = self._video_conv_files.pop(row)
+                self._video_conv_tags.pop(removed, None)
             self.video_conv_file_list.takeItem(row)
         self._video_conv_sync_actions()
 
@@ -373,6 +504,7 @@ class VideoConvertTab(QWidget):
                 return
         self._video_conv_files.clear()
         self.video_conv_file_list.clear()
+        self._video_conv_tags.clear()
         self._video_conv_sync_actions()
         self.video_conv_status_label.setText("File list cleared.")
 
@@ -438,7 +570,7 @@ class VideoConvertTab(QWidget):
         set_controls_busy(
             (self.video_conv_start_btn, self.video_conv_add_files_btn,
              self.video_conv_add_folder_btn, self.video_conv_remove_btn,
-             self.video_conv_clear_btn),
+             self.video_conv_clear_btn, self.video_conv_tags_btn),
             True,
         )
         self.video_conv_cancel_btn.setEnabled(True)
@@ -490,6 +622,10 @@ class VideoConvertTab(QWidget):
             copy_audio=self.video_conv_audio_copy_chk.isChecked(),
             clean_tags=clean_tags,
             idx_label=idx_label,
+            meta_title=(self._video_conv_tags.get(src, {}) or {}).get("title"),
+            meta_artist=(self._video_conv_tags.get(src, {}) or {}).get("artist"),
+            meta_album=(self._video_conv_tags.get(src, {}) or {}).get("album"),
+            meta_year=(self._video_conv_tags.get(src, {}) or {}).get("year"),
         )
         self._tracker.track(self._video_conv_worker)
         self._video_conv_worker.progress.connect(self._on_video_conv_progress)
@@ -505,6 +641,7 @@ class VideoConvertTab(QWidget):
         displayed string actually changes (progress itself emits ~5 Hz).
         """
         self.video_conv_progress.setValue(pct)
+        self.progress_changed.emit(pct)
         eta = self._eta.update(pct)
         fmt = f"%p% • ETA {eta}" if eta is not None else "%p%"
         if fmt != self._eta_format:
@@ -609,6 +746,7 @@ class VideoConvertTab(QWidget):
     def _video_conv_reset(self) -> None:
         self._video_conv_files.clear()
         self.video_conv_file_list.clear()
+        self._video_conv_tags.clear()
         self._video_conv_clean_tags = None
         self._video_conv_freeze_settings(False)
         self._eta_format = "%p%"
@@ -616,7 +754,7 @@ class VideoConvertTab(QWidget):
         set_controls_busy(
             (self.video_conv_start_btn, self.video_conv_add_files_btn,
              self.video_conv_add_folder_btn, self.video_conv_remove_btn,
-             self.video_conv_clear_btn),
+             self.video_conv_clear_btn, self.video_conv_tags_btn),
             False,
         )
         self.video_conv_cancel_btn.setEnabled(False)

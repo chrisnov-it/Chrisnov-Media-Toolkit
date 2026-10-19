@@ -7,6 +7,7 @@ from pathlib import Path
 # Default tags to strip from titles
 DEFAULT_CLEAN_TAGS = [
     # --- English ---
+    "Official",
     "Official Music Video",
     "Official Video",
     "Official Lyrics Video",
@@ -98,6 +99,10 @@ def clean_title(title: str, tags: list[str]) -> str:
     result = re.sub(r"(?:\s*[\|\/,–—\-]\s*){2,}", " - ", result)
     result = re.sub(r"[\s\|\/,–—\-:]+$", "", result)
     result = re.sub(r"^[\s\|\/,–—\-:]+", "", result).strip()
+    # A lone pipe left in the middle (e.g. "Song | Artist" with no trailing
+    # tag) is still a separator: render it as " - " like the multi-separator
+    # rule above, instead of leaving a stray "|" in the filename.
+    result = re.sub(r"\s*\|\s*", " - ", result)
     # Remove any remaining empty or whitespace-only brackets
     result = re.sub(r"\[\s*\]|\(\s*\)", "", result).strip()
     result = re.sub(r"\s+", " ", result).strip()

@@ -7,7 +7,7 @@ on:
       version:
         description: "Release version, for example 0.2.0-beta.4"
         required: true
-        default: "0.2.0-beta.4"
+        default: "0.2.0-beta.6"
   push:
     tags:
       - "v*"
@@ -106,6 +106,15 @@ jobs:
           "LITE_ZIP=$liteZip"         | Out-File -FilePath $env:GITHUB_ENV -Append
           "BUNDLED_ZIP=$bundledZip"   | Out-File -FilePath $env:GITHUB_ENV -Append
 
+      - name: Package browser extension
+        shell: pwsh
+        run: |
+          if (Test-Path "browser-extension") {
+            Compress-Archive -Path "browser-extension/*" -DestinationPath "dist/chrisnov-media-toolkit-browser-extension.zip" -Force
+            $h = (Get-FileHash -Algorithm SHA256 "dist/chrisnov-media-toolkit-browser-extension.zip").Hash
+            "$h  chrisnov-media-toolkit-browser-extension.zip" | Set-Content -Path "dist/chrisnov-media-toolkit-browser-extension.zip.sha256"
+          }
+
       - name: Upload artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -115,6 +124,8 @@ jobs:
             dist/chrisnov-media-toolkit-v*-windows-x64-lite.zip.sha256
             dist/chrisnov-media-toolkit-v*-windows-x64-bundled.zip
             dist/chrisnov-media-toolkit-v*-windows-x64-bundled.zip.sha256
+            dist/chrisnov-media-toolkit-browser-extension.zip
+            dist/chrisnov-media-toolkit-browser-extension.zip.sha256
           if-no-files-found: error
           retention-days: 1
 
@@ -191,3 +202,4 @@ jobs:
 
       # R2 upload has been removed - all assets are now distributed
       # via GitHub Releases. See README.md for download URLs.
+

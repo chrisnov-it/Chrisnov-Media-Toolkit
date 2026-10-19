@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QListWidget,
     QListWidgetItem,
+    QMenu,
     QMessageBox,
     QPushButton,
     QSizePolicy,
@@ -31,7 +32,7 @@ from PySide6.QtWidgets import (
 from .history import DownloadHistory
 from .icon import queue_status_icon
 from .theme import _base_font_points, small_font_size, tiny_font_size
-from .utils import install_placeholder, open_in_explorer, strip_ansi
+from .utils import install_placeholder, open_in_explorer, open_result, strip_ansi
 
 
 def _fmt_size(n: int) -> str:
@@ -106,6 +107,14 @@ class HistoryTab(QWidget):
         self._history_filter.addItems(["All", "Audio", "Video", "Playlist"])
         self._history_filter.currentTextChanged.connect(self._on_history_search_changed)
         filter_row.addWidget(self._history_filter)
+
+        self._history_status_filter = QComboBox()
+        self._history_status_filter.setAccessibleName("History status filter")
+        self._history_status_filter.addItems(["All", "Completed", "Failed"])
+        self._history_status_filter.currentTextChanged.connect(
+            self._on_history_search_changed
+        )
+        filter_row.addWidget(self._history_status_filter)
         root.addLayout(filter_row)
 
         # Table-like list widget
@@ -116,6 +125,12 @@ class HistoryTab(QWidget):
         self._history_list.setWordWrap(True)
         self._history_list.itemDoubleClicked.connect(self._on_history_item_action)
         self._history_list.itemSelectionChanged.connect(self._sync_remove_button)
+        self._history_list.setContextMenuPolicy(
+            Qt.ContextMenuPolicy.CustomContextMenu
+        )
+        self._history_list.customContextMenuRequested.connect(
+            self._on_history_context_menu
+        )
         root.addWidget(self._history_list, 1)
 
         # Empty-state placeholder — rendered *inside* the list box (P2): the
@@ -187,6 +202,12 @@ class HistoryTab(QWidget):
         for model_index, entry in enumerate(self._history.entries):
             # Filter by type
             if filter_type != "All" and entry.get("type", "").lower() != filter_type.lower():
+                continue
+
+            # Filter by status
+            status_filter = self._history_status_filter.currentText()
+            if (status_filter != "All"
+                    and entry.get("status", "").lower() != status_filter.lower()):
                 continue
 
             # Search by filename or URL
@@ -314,6 +335,55 @@ class HistoryTab(QWidget):
             return
         self.refresh()
         self._sync_remove_button()
+
+    def _on_history_context_menu(self, pos) -> None:
+        """Right-click menu: re-download or open the file/folder.
+
+        Double-click only does one thing (open when the file exists, else
+        requeue), so a successful download could not be re-downloaded from the
+        History tab. The menu exposes both actions independently.
+        """
+        item = self._history_list.itemAt(pos)
+        if item is None:
+            return
+        entry = item.data(Qt.ItemDataRole.UserRole)
+        if not isinstance(entry, dict):
+            return
+
+        filepath = entry.get("filepath", "")
+        url = entry.get("url", "")
+        menu = QMenu(self)
+
+        if filepath and Path(filepath).exists():
+            target = Path(filepath)
+            if target.is_dir():
+                act = menu.addAction("Open folder")
+                act.triggered.connect(
+                    lambda checked=False, p=str(target): open_in_explorer(p)
+                )
+            else:
+                act = menu.addAction("Open file")
+                act.triggered.connect(
+                    lambda checked=False, p=str(target): open_result(p)
+                )
+                act2 = menu.addAction("Open containing folder")
+                act2.triggered.connect(
+                    lambda checked=False, p=str(target): open_in_explorer(str(target.parent))
+                )
+
+        if url.startswith(("http://", "https://")):
+            _fn = entry.get("filename", "")
+            act = menu.addAction("Download again")
+            act.triggered.connect(
+                lambda checked=False, u=url, fn=_fn:
+                self.requeue_requested.emit(u, fn)
+            )
+
+        act = menu.addAction("Remove entry")
+        act.triggered.connect(self._on_history_remove)
+
+        if menu.actions():
+            menu.exec(self._history_list.viewport().mapToGlobal(pos))
 
     def _on_history_item_action(self, item: QListWidgetItem) -> None:
         """Handle double-click on a history item: Open Folder or Re-download."""

@@ -1,0 +1,20 @@
+{
+  "manifest_version": 2,
+  "name": "Chrisnov Media Toolkit Helper",
+  "version": "0.1.0",
+  "description": "Send the current page or link to the Chrisnov Media Toolkit desktop app.",
+  "permissions": [
+    "contextMenus",
+    "storage",
+    "activeTab",
+    "notifications"
+  ],
+  "background": {
+    "scripts": ["background.js"],
+    "persistent": false
+  },
+  "options_ui": {
+    "page": "options.html",
+    "browser_style": true
+  }
+}

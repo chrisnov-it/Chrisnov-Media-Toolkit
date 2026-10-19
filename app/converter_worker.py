@@ -102,6 +102,10 @@ class ConvertWorker(CancellableWorker):
         trim_silence: bool = False,
         clean_tags: list[str] | None = None,
         idx_label: str = "",
+        meta_title: str | None = None,
+        meta_artist: str | None = None,
+        meta_album: str | None = None,
+        meta_year: str | None = None,
     ):
         super().__init__()
         self.src          = Path(src)
@@ -116,6 +120,10 @@ class ConvertWorker(CancellableWorker):
         self.trim_silence = trim_silence
         self.clean_tags   = clean_tags
         self.idx_label    = idx_label
+        self.meta_title   = (meta_title or "").strip() or None
+        self.meta_artist  = (meta_artist or "").strip() or None
+        self.meta_album   = (meta_album or "").strip() or None
+        self.meta_year    = (meta_year or "").strip() or None
         self.duration: float | None = None
         self._process: subprocess.Popen[str] | None = None
 
@@ -153,6 +161,19 @@ class ConvertWorker(CancellableWorker):
             out_path = resolve_output_path(
                 self.src, self.outdir, self.fmt, self.clean_tags,
             )
+            # Tell the user when the requested name already existed and a
+            # numbered suffix was appended (so the output is never silently
+            # overwritten).
+            from .cleaner import clean_title as _clean_title
+
+            expected_name = (
+                f"{_clean_title(self.src.stem, self.clean_tags) if self.clean_tags else self.src.stem}"
+                f".{self.fmt}"
+            )
+            if out_path.name != expected_name:
+                self.status.emit(
+                    f"{self.idx_label} Name taken — saved as {out_path.name}."
+                )
 
             try:
                 if self.norm_mode == "ebu":
@@ -275,6 +296,18 @@ class ConvertWorker(CancellableWorker):
             cmd += ["-af", ",".join(af_filters)]
         cmd += self._codec_args()
         cmd += self._sample_rate_args()
+        meta_title = getattr(self, "meta_title", None)
+        meta_artist = getattr(self, "meta_artist", None)
+        meta_album = getattr(self, "meta_album", None)
+        meta_year = getattr(self, "meta_year", None)
+        if meta_title:
+            cmd += ["-metadata", f"title={meta_title}"]
+        if meta_artist:
+            cmd += ["-metadata", f"artist={meta_artist}"]
+        if meta_album:
+            cmd += ["-metadata", f"album={meta_album}"]
+        if meta_year:
+            cmd += ["-metadata", f"date={meta_year}"]
         cmd += [str(out_path)]
         return cmd
 
@@ -362,6 +395,10 @@ class VideoConvertWorker(CancellableWorker):
         copy_audio: bool = True,
         clean_tags: list[str] | None = None,
         idx_label: str = "",
+        meta_title: str | None = None,
+        meta_artist: str | None = None,
+        meta_album: str | None = None,
+        meta_year: str | None = None,
     ):
         super().__init__()
         self.src = Path(src)
@@ -371,6 +408,10 @@ class VideoConvertWorker(CancellableWorker):
         self.copy_audio = copy_audio
         self.clean_tags = clean_tags
         self.idx_label = idx_label
+        self.meta_title = (meta_title or "").strip() or None
+        self.meta_artist = (meta_artist or "").strip() or None
+        self.meta_album = (meta_album or "").strip() or None
+        self.meta_year = (meta_year or "").strip() or None
         self.duration: float | None = None
         self._process: subprocess.Popen[str] | None = None
 
@@ -399,6 +440,16 @@ class VideoConvertWorker(CancellableWorker):
             out_path = resolve_output_path(
                 self.src, self.outdir, self.fmt, self.clean_tags,
             )
+            from .cleaner import clean_title as _clean_title
+
+            expected_name = (
+                f"{_clean_title(self.src.stem, self.clean_tags) if self.clean_tags else self.src.stem}"
+                f".{self.fmt}"
+            )
+            if out_path.name != expected_name:
+                self.status.emit(
+                    f"{self.idx_label} Name taken — saved as {out_path.name}."
+                )
             cmd = self._build_cmd(ffmpeg, out_path)
             self.status.emit(f"{self.idx_label} Converting {self.src.name}...")
             self.progress.emit(PROGRESS_BAND[0])
@@ -463,6 +514,18 @@ class VideoConvertWorker(CancellableWorker):
         cmd += self._audio_args()
         if self.fmt == "mp4":
             cmd += ["-movflags", "+faststart"]
+        meta_title = getattr(self, "meta_title", None)
+        meta_artist = getattr(self, "meta_artist", None)
+        meta_album = getattr(self, "meta_album", None)
+        meta_year = getattr(self, "meta_year", None)
+        if meta_title:
+            cmd += ["-metadata", f"title={meta_title}"]
+        if meta_artist:
+            cmd += ["-metadata", f"artist={meta_artist}"]
+        if meta_album:
+            cmd += ["-metadata", f"album={meta_album}"]
+        if meta_year:
+            cmd += ["-metadata", f"date={meta_year}"]
         cmd += [str(out_path)]
         return cmd
 

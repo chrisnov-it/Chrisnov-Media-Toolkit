@@ -19,8 +19,11 @@ from PySide6.QtWidgets import (
     QButtonGroup,
     QCheckBox,
     QComboBox,
+    QDialog,
+    QDialogButtonBox,
     QDoubleSpinBox,
     QFileDialog,
+    QFormLayout,
     QGridLayout,
     QGroupBox,
     QHBoxLayout,
@@ -28,6 +31,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QListWidget,
     QListWidgetItem,
+    QMenu,
     QMessageBox,
     QProgressBar,
     QPushButton,
@@ -78,6 +82,8 @@ class AudioConverterTab(QWidget):
     #: window title (same contract as DownloadTab).
     batch_started = Signal()
     batch_finished = Signal(int, int)  # done, total
+    #: Live progress (0-100) for the window title.
+    progress_changed = Signal(int)
 
     def __init__(self, settings: AppSettings,
                  tags_provider: Callable[[], str],
@@ -89,6 +95,9 @@ class AudioConverterTab(QWidget):
         self._history = history
         self._tracker = WorkerTracker()
         self._conv_files: list[Path] = []     # files queued for conversion
+        # Per-file manual tag overrides (title/artist/album/year) edited via
+        # the file list's right-click menu. Keyed by source path.
+        self._conv_tags: dict[Path, dict[str, str]] = {}
         self._conv_worker: ConvertWorker | None = None
         self._conv_queue: list[Path] = []
         self._conv_idx = 0
@@ -142,6 +151,12 @@ class AudioConverterTab(QWidget):
         self.conv_file_list.setSelectionMode(
             QAbstractItemView.SelectionMode.ExtendedSelection
         )
+        self.conv_file_list.setContextMenuPolicy(
+            Qt.ContextMenuPolicy.CustomContextMenu
+        )
+        self.conv_file_list.customContextMenuRequested.connect(
+            self._conv_context_menu
+        )
         root.addWidget(self.conv_file_list, 1)
 
         # Empty-state placeholder rendered *inside* the list box (P2) —
@@ -160,10 +175,16 @@ class AudioConverterTab(QWidget):
         self.conv_remove_btn.clicked.connect(self._conv_remove_selected)
         self.conv_clear_btn = QPushButton("Clear")
         self.conv_clear_btn.clicked.connect(self._conv_clear_files)
+        self.conv_tags_btn = QPushButton("Tags…")
+        self.conv_tags_btn.setToolTip(
+            "Edit Title/Artist/Album/Year for the selected file"
+        )
+        self.conv_tags_btn.clicked.connect(self._conv_edit_tags_selected)
         fbtn_row.addWidget(self.conv_add_files_btn)
         fbtn_row.addWidget(self.conv_add_folder_btn)
         fbtn_row.addWidget(self.conv_remove_btn)
         fbtn_row.addWidget(self.conv_clear_btn)
+        fbtn_row.addWidget(self.conv_tags_btn)
         fbtn_row.addStretch()
         root.addLayout(fbtn_row)
 
@@ -414,6 +435,116 @@ class AudioConverterTab(QWidget):
         self.conv_status_label.setText(msg)
         return added
 
+    def _conv_context_menu(self, pos) -> None:
+        """Right-click menu on the file list: edit manual tags."""
+        if self._conv_active:
+            return
+        item = self.conv_file_list.itemAt(pos)
+        if item is None:
+            return
+        row = self.conv_file_list.row(item)
+        if not (0 <= row < len(self._conv_files)):
+            return
+        path = self._conv_files[row]
+        menu = QMenu(self)
+        act = menu.addAction("Edit tags…")
+        act.triggered.connect(lambda checked=False, p=path: self._edit_tags(p))
+        menu.exec(self.conv_file_list.viewport().mapToGlobal(pos))
+
+    def _probe_source_tags(self, path: Path) -> dict[str, str]:
+        """Best-effort read of existing metadata from the source file."""
+        out: dict[str, str] = {}
+        try:
+            import mutagen
+            audio = mutagen.File(path)
+        except Exception:  # noqa: BLE001 — mutagen can raise many types
+            return out
+        if audio is None or audio.tags is None:
+            return out
+        tags = audio.tags
+
+        def _get(keys: tuple[str, ...]) -> str:
+            for key in keys:
+                try:
+                    value = tags[key]
+                except (KeyError, TypeError):
+                    continue
+                text = str(value)
+                # mutagen ID3/vorbis frames carry .text
+                frame_text = getattr(value, "text", None)
+                if isinstance(frame_text, list) and frame_text:
+                    text = str(frame_text[0])
+                elif isinstance(frame_text, str):
+                    text = frame_text
+                text = text.strip()
+                if text:
+                    return text
+            return ""
+
+        out["title"] = _get(("title", "TITLE", "Title", "TIT2", "©nam"))
+        out["artist"] = _get(("artist", "ARTIST", "Artist", "TPE1", "©ART"))
+        out["album"] = _get(("album", "ALBUM", "Album", "TALB", "©alb"))
+        raw_year = _get(("date", "DATE", "Date", "TDRC", "TYER", "©day", "year"))
+        # Collapse 20261001 -> 2026 if present
+        if len(raw_year) == 8 and raw_year.isdigit():
+            raw_year = raw_year[:4]
+        out["year"] = raw_year
+        return out
+
+    def _edit_tags(self, path: Path) -> None:
+        """Open a dialog to set manual tags for one queued file."""
+        dialog = QDialog(self)
+        dialog.setWindowTitle(f"Edit tags — {path.name}")
+        dialog.setFixedWidth(360)
+        form = QFormLayout(dialog)
+
+        existing = self._probe_source_tags(path)
+        override = self._conv_tags.get(path, {})
+        for key in ("title", "artist", "album", "year"):
+            if key in override:
+                existing[key] = override[key]
+
+        edits: dict[str, QLineEdit] = {}
+        for label, key in (("Title", "title"), ("Artist", "artist"),
+                           ("Album", "album"), ("Year", "year")):
+            edit = QLineEdit(existing.get(key, ""))
+            edits[key] = edit
+            form.addRow(label + ":", edit)
+
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok
+            | QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        form.addRow(buttons)
+
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+
+        values = {k: edits[k].text().strip() for k in edits}
+        if any(values.values()):
+            self._conv_tags[path] = values
+            # Reflect the override in the row tooltip.
+            row = self._conv_files.index(path) if path in self._conv_files else -1
+            if row >= 0:
+                item = self.conv_file_list.item(row)
+                if item is not None:
+                    item.setToolTip(
+                        str(path) + "\nManual tags: "
+                        + ", ".join(f"{k}={v}" for k, v in values.items() if v)
+                    )
+        else:
+            self._conv_tags.pop(path, None)
+
+    def _conv_edit_tags_selected(self) -> None:
+        if self._conv_active or not self._conv_files:
+            return
+        sel = self.conv_file_list.selectedItems()
+        row = self.conv_file_list.row(sel[0]) if sel else 0
+        if 0 <= row < len(self._conv_files):
+            self._edit_tags(self._conv_files[row])
+
     def _conv_browse_files(self) -> None:
         exts = " ".join(f"*.{e}" for e in sorted(SUPPORTED_INPUT_EXTENSIONS))
         paths, _ = QFileDialog.getOpenFileNames(
@@ -438,7 +569,8 @@ class AudioConverterTab(QWidget):
         )
         for row in rows:
             if 0 <= row < len(self._conv_files):
-                self._conv_files.pop(row)
+                removed = self._conv_files.pop(row)
+                self._conv_tags.pop(removed, None)
             self.conv_file_list.takeItem(row)
         self._conv_sync_actions()
 
@@ -458,6 +590,7 @@ class AudioConverterTab(QWidget):
                 return
         self._conv_files.clear()
         self.conv_file_list.clear()
+        self._conv_tags.clear()
         self._conv_sync_actions()
         self.conv_status_label.setText("File list cleared.")
 
@@ -548,7 +681,7 @@ class AudioConverterTab(QWidget):
         set_controls_busy(
             (self.conv_start_btn, self.conv_add_files_btn,
              self.conv_add_folder_btn, self.conv_remove_btn,
-             self.conv_clear_btn),
+             self.conv_clear_btn, self.conv_tags_btn),
             True,
         )
         self.conv_cancel_btn.setEnabled(True)
@@ -624,6 +757,10 @@ class AudioConverterTab(QWidget):
             trim_silence=self.conv_trim_chk.isChecked(),
             clean_tags=clean_tags,
             idx_label=idx_label,
+            meta_title=(self._conv_tags.get(src, {}) or {}).get("title"),
+            meta_artist=(self._conv_tags.get(src, {}) or {}).get("artist"),
+            meta_album=(self._conv_tags.get(src, {}) or {}).get("album"),
+            meta_year=(self._conv_tags.get(src, {}) or {}).get("year"),
         )
         self._tracker.track(self._conv_worker)
         self._conv_worker.progress.connect(self._on_conv_progress)
@@ -639,6 +776,7 @@ class AudioConverterTab(QWidget):
         displayed string actually changes (progress itself emits ~5 Hz).
         """
         self.conv_progress.setValue(pct)
+        self.progress_changed.emit(pct)
         eta = self._eta.update(pct)
         fmt = f"%p% • ETA {eta}" if eta is not None else "%p%"
         if fmt != self._eta_format:
@@ -739,6 +877,7 @@ class AudioConverterTab(QWidget):
     def _conv_reset(self) -> None:
         self._conv_files.clear()
         self.conv_file_list.clear()
+        self._conv_tags.clear()
         self._conv_clean_tags = None
         self._conv_freeze_settings(False)
         self._eta_format = "%p%"
@@ -746,7 +885,7 @@ class AudioConverterTab(QWidget):
         set_controls_busy(
             (self.conv_start_btn, self.conv_add_files_btn,
              self.conv_add_folder_btn, self.conv_remove_btn,
-             self.conv_clear_btn),
+             self.conv_clear_btn, self.conv_tags_btn),
             False,
         )
         self.conv_cancel_btn.setEnabled(False)

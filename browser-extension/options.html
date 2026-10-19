@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Chrisnov Media Toolkit Helper — Options</title>
+  <style>
+    body { font-family: sans-serif; padding: 16px; max-width: 480px; }
+    label { display: block; margin-top: 12px; font-weight: 600; }
+    input { width: 100%; padding: 6px; box-sizing: border-box; }
+    button { margin-top: 12px; padding: 6px 12px; }
+    #status { margin-top: 8px; color: green; }
+  </style>
+</head>
+<body>
+  <h2>Chrisnov Media Toolkit Helper</h2>
+  <p>Enable <b>Browser helper (localhost)</b> in the app, then copy the token and paste it here.</p>
+  <label for="token">Token</label>
+  <input id="token" type="text" placeholder="paste token here">
+  <label for="port">Port</label>
+  <input id="port" type="number" value="8765">
+  <button id="save">Save</button>
+  <div id="status"></div>
+  <script src="options.js"></script>
+</body>
+</html>
