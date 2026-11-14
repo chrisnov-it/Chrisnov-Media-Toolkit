@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-APP_VERSION = "0.2.0-beta.6"
+APP_VERSION = "1.0.0"
 
 # Per-user config dir: download history + skip-duplicates archives live here.
 CONFIG_DIR = Path.home() / ".config" / "chrisnov-media-toolkit"

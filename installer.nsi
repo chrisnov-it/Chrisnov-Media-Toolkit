@@ -22,7 +22,7 @@
 
 !define PRODUCT_NAME "Chrisnov Media Toolkit"
 !ifndef PRODUCT_VERSION
-  !define PRODUCT_VERSION "0.2.0-beta.4"
+  !define PRODUCT_VERSION "1.0.0"
 !endif
 !define PRODUCT_PUBLISHER "Chrisnov IT Solutions"
 !define PRODUCT_WEB_SITE "https://chrisnov.com"

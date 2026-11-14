@@ -255,9 +255,10 @@ class ConvertWorker(CancellableWorker):
             if self.cbr:
                 args += ["-b:a", f"{self.bitrate}k"]
             else:
-                # aac VBR: 1(low)…5(high)
-                vbr = max(1, min(5, round(self.bitrate / 64)))
-                args += ["-vbr", str(vbr)]
+                # Native FFmpeg aac encoder uses -q:a (0.5..2.0), not -vbr
+                # (which is libfdk_aac-only and causes native aac to fail).
+                q = max(0.5, min(2.0, round(self.bitrate / 160, 1)))
+                args += ["-q:a", str(q)]
             return args
 
         if self.fmt == "opus":

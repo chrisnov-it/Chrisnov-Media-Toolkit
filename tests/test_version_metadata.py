@@ -12,6 +12,7 @@ from pathlib import Path
 from app.constants import APP_VERSION
 
 VERSION_INFO = Path(__file__).resolve().parent.parent / "version_info.txt"
+INSTALLER_NSI = Path(__file__).resolve().parent.parent / "installer.nsi"
 
 
 def _text() -> str:
@@ -49,3 +50,11 @@ def test_file_is_pure_ascii():
     the build host's encoding assumptions, so we keep it ASCII-only."""
     raw = VERSION_INFO.read_bytes()
     raw.decode("ascii")
+
+
+def test_installer_nsi_matches_app_version():
+    """Guard installer.nsi's default PRODUCT_VERSION against drifting from APP_VERSION."""
+    text = INSTALLER_NSI.read_text(encoding="utf-8")
+    match = re.search(r'!define\s+PRODUCT_VERSION\s+"([^"]+)"', text)
+    assert match, "PRODUCT_VERSION missing from installer.nsi"
+    assert match.group(1) == APP_VERSION

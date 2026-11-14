@@ -6,6 +6,27 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-11-14
+
+First stable release out of beta.
+
+### Fixed
+
+- **Embedded artist & genre metadata** (`app/tags.py`)
+  - When a downloaded title has the `Artist - Song` shape, the parsed artist now replaces the YouTube channel/uploader name that `yt-dlp`'s `FFmpegMetadata` writes as a fallback.
+  - Generic YouTube upload categories (`Music`, `People & Blogs`, `Entertainment`, etc.) are stripped from the `genre` tag while preserving real music genres.
+- **Title cleanup** (`app/cleaner.py`)
+  - Added `Lyrics` to `DEFAULT_CLEAN_TAGS`.
+  - Removed empty brackets before normalizing `|` / `-` separators so titles with pipes and stripped tags no longer leave dangling `-` characters or extra spaces.
+- **AAC VBR encoding** (`app/converter_worker.py`)
+  - Switched `m4a` VBR mode from `-vbr` (`libfdk_aac`-only) to `-q:a` (`0.5..2.0`) for FFmpeg's native `aac` encoder.
+
+### Security
+
+- **Localhost browser helper API** (`app/http_api.py`, `browser-extension/`)
+  - Removed wildcard `Access-Control-Allow-Origin: *` headers.
+  - Switched `/queue` to `POST` with `Authorization: Bearer <token>`, `secrets.compare_digest()` token verification, payload size limits, and race-safe server shutdown (`daemon_threads = True`).
+
 ## [0.2.0-beta.6] - 2026-10-19
 
 ### Added

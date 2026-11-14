@@ -103,6 +103,19 @@ class TestCodecArgs:
         ar_count = full.count("-ar")
         assert ar_count == 1, f"-ar appears {ar_count} times in full args: {full}"
 
+    def test_m4a_vbr_uses_qa_instead_of_libfdk_vbr(self):
+        """Native FFmpeg aac encoder uses -q:a, never -vbr (libfdk_aac-only)."""
+        from app.converter_worker import ConvertWorker
+        w = ConvertWorker.__new__(ConvertWorker)
+        w.fmt = "m4a"
+        w.cbr = False
+        w.bitrate = 192
+        args = w._codec_args()
+        assert "-vbr" not in args
+        assert "-q:a" in args
+        q_val = float(args[args.index("-q:a") + 1])
+        assert 0.5 <= q_val <= 2.0
+
 
 class TestBuildCmdAndPartialCleanup:
     """-nostdin on every ffmpeg invocation, plus partial-output cleanup."""

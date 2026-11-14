@@ -46,12 +46,17 @@ class TestCleanTitle:
         ("Song Title (Official Music Video)", "Song Title"),
         ("Song Title [Official Video]",       "Song Title"),
         ("Song Title (Official Lyric Video)", "Song Title"),
+        ("Song Title (Lyrics)",               "Song Title"),
+        ("Song Title [Lyrics]",               "Song Title"),
         # Indonesian tags
         ("Lagu Bagus (Video Lirik)",          "Lagu Bagus"),
         ("Lagu Bagus [Lirik]",                "Lagu Bagus"),
         # Separator forms
         ("Artist - Song | Official Music Video", "Artist - Song"),
         ("Artist - Song / Lyric Video",          "Artist - Song"),
+        ("Song Name | ()",                       "Song Name"),
+        ("Song Name | ( ) | Artist",             "Song Name - Artist"),
+        ("Song  |  Official Video  |  Artist",   "Song - Artist"),
         # Multiple tags in one title
         ("Song (Official Music Video) [HD]",   "Song"),
         # No tag — title unchanged

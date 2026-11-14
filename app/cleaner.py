@@ -17,6 +17,7 @@ DEFAULT_CLEAN_TAGS = [
     "Music Video",
     "Lyric Video",
     "Lyrics Video",
+    "Lyrics",
     "Official Audio",
     "Audio",
     "Topic",
@@ -94,6 +95,11 @@ def clean_title(title: str, tags: list[str]) -> str:
     result = re.sub(r"\s+[\[\(]\s*$", "", result)             # trailing orphan opener
     result = re.sub(r"^\s*[\]\)]\s+", "", result)             # leading orphan closer
 
+    # Remove any empty or whitespace-only brackets before normalizing
+    # separators, so patterns like "Song | ()" or "Song | ( ) | Artist"
+    # collapse cleanly instead of leaving dangling "-" or extra spaces.
+    result = re.sub(r"\[\s*\]|\(\s*\)", "", result)
+
     # Collapse whitespace and trim noisy punctuation
     result = re.sub(r"\s+", " ", result).strip()
     result = re.sub(r"(?:\s*[\|\/,–—\-]\s*){2,}", " - ", result)
@@ -103,8 +109,6 @@ def clean_title(title: str, tags: list[str]) -> str:
     # tag) is still a separator: render it as " - " like the multi-separator
     # rule above, instead of leaving a stray "|" in the filename.
     result = re.sub(r"\s*\|\s*", " - ", result)
-    # Remove any remaining empty or whitespace-only brackets
-    result = re.sub(r"\[\s*\]|\(\s*\)", "", result).strip()
     result = re.sub(r"\s+", " ", result).strip()
     return result
 

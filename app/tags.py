@@ -65,6 +65,31 @@ _COMMENT_KEYS = (
     "comment", "COMMENT", "Comment",
 )
 
+# Genre keys written by FFmpegMetadata, per format. yt-dlp falls back to
+# YouTube's video upload category ("Music", "People & Blogs", ...) when no
+# real music genre exists; those generic categories are stripped so players
+# don't show bogus genres.
+_GENRE_KEYS = ("genre", "GENRE", "Genre", "TCON", "\xa9gen")
+
+_YOUTUBE_GENERIC_GENRES = frozenset({
+    "autos & vehicles",
+    "comedy",
+    "education",
+    "entertainment",
+    "film & animation",
+    "gaming",
+    "howto & style",
+    "music",
+    "news & politics",
+    "nonprofits & activism",
+    "people & blog",
+    "people & blogs",
+    "pets & animals",
+    "science & technology",
+    "sports",
+    "travel & events",
+})
+
 # ID3 COMM frame keys carry the language/description suffix
 # (e.g. "COMM:ID3v1 Comment:eng"), so they match by prefix instead.
 _COMMENT_KEY_PREFIX = "COMM"
@@ -154,6 +179,7 @@ def plan_tag_repairs(
     # --- title: strip fluff tags, then split "Artist - Song" ---------------
     # The split runs even without Clean Title — it repairs yt-dlp's metadata,
     # not the filename.
+    artist_handled = False
     try:
         for key in _TITLE_KEYS:
             try:
@@ -165,7 +191,8 @@ def plan_tag_repairs(
             split = split_artist_title(new)
             if split:
                 artist, new = split          # split returns (artist, song)
-                plan.extend(_plan_artist(tags, key, artist, clean_tags))
+                plan.extend(_plan_artist(tags, key, artist))
+                artist_handled = True
             if new and new != old:
                 plan.append((key, value, new))
             break  # first title key found is the one to use
@@ -173,11 +200,9 @@ def plan_tag_repairs(
         log.debug("plan_tag_repairs: title failed for %s", path, exc_info=True)
 
     # --- artist: strip fluff (Official/Topic/...) from channel names ----------
-    # Only when the title block above did not already repair the artist (it
-    # cleans an existing artist there, or creates one from "Artist - Song").
-    try:
-        already = {str(p[0]) for p in plan}
-        if not (already & {str(k) for k in _ARTIST_KEYS}):
+    # Only when the title did not have an "Artist - Song" split.
+    if not artist_handled:
+        try:
             for key in _ARTIST_KEYS:
                 try:
                     value = tags[key]
@@ -193,9 +218,9 @@ def plan_tag_repairs(
                 if new and new != old:
                     plan.append((key, value, new))
                 break
-    except Exception:
-        log.debug("plan_tag_repairs: artist cleanup failed for %s", path,
-                  exc_info=True)
+        except Exception:
+            log.debug("plan_tag_repairs: artist cleanup failed for %s", path,
+                      exc_info=True)
 
     # --- date: collapse 20261001 -> 2026 -----------------------------------
     try:
@@ -245,36 +270,42 @@ def plan_tag_repairs(
     except Exception:
         log.debug("plan_tag_repairs: comment failed for %s", path, exc_info=True)
 
+    # --- genre: drop YouTube upload categories ("Music", "People & Blogs") -
+    try:
+        for key in _GENRE_KEYS:
+            try:
+                value = tags[key]
+            except (KeyError, TypeError):
+                continue
+            if _frame_text(value).strip().lower() in _YOUTUBE_GENERIC_GENRES:
+                plan.append((key, value, None))
+    except Exception:
+        log.debug("plan_tag_repairs: genre failed for %s", path, exc_info=True)
+
     return plan
 
 
 def _plan_artist(tags: object, title_key: object, artist: str,
                  clean_tags: list[str] | None = None
                  ) -> list[tuple[object, object, str | None]]:
-    """Plan writing *artist* when the artist tag is missing or empty.
+    """Plan writing *artist* extracted from an ``Artist - Song`` title.
 
-    Never overwrites a real artist value with a different one, but it does
-    clean an existing value of fluff such as "Official"/"Topic" that the
-    source channel name carried. Creates the correct key for the container
-    (ID3 TPE1 frame, MP4 ©ART, vorbis comment) when absent — ``value`` of
-    None means "create this key" for the writer.
+    yt-dlp's FFmpegMetadata falls back to the YouTube uploader/channel name
+    for the artist tag whenever a video lacks dedicated music metadata, so
+    an existing non-empty artist tag on an ``Artist - Song`` upload is
+    almost always the channel name rather than the performer. Replace it
+    when it differs from *artist*, or create the container's artist key
+    when absent (``value`` of None means "create this key" for the writer).
     """
-    from .cleaner import DEFAULT_CLEAN_TAGS, clean_title
-
-    tags_to_use = clean_tags if clean_tags else DEFAULT_CLEAN_TAGS
-
     for key in _ARTIST_KEYS:
         try:
             value = tags[key]
         except (KeyError, TypeError):
             continue
         text = _frame_text(value).strip()
-        if text:
-            cleaned = clean_title(text, tags_to_use)
-            if cleaned and cleaned != text:
-                return [(key, value, cleaned)]
-            return []             # a real artist is already there
-        return [(key, value, artist)]
+        if text != artist:
+            return [(key, value, artist)]
+        return []
 
     # No artist key at all — create it in the container's shape.
     new_key = _ARTIST_KEY_FOR_TITLE.get(str(title_key))

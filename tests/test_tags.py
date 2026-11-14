@@ -13,7 +13,7 @@ from typing import ClassVar
 
 import pytest
 from mutagen import File as MutagenFile
-from mutagen.id3 import COMM, ID3, TDRC, TIT2, TPE1, TXXX
+from mutagen.id3 import COMM, ID3, TCON, TDRC, TIT2, TPE1, TXXX
 from mutagen.mp4 import MP4
 
 from app.cleaner import clean_title, rename_with_cleanup
@@ -203,15 +203,35 @@ class TestSyncEmbeddedTags:
         assert str(f.tags["TIT2"].text[0]) == "Never Gonna Give You Up"
         assert str(f.tags["TPE1"].text[0]) == "Rick Astley"
 
-    def test_existing_artist_is_not_overwritten(self, tmp_path):
-        p = tmp_path / "keep.mp3"
+    def test_channel_artist_is_replaced_by_split_artist(self, tmp_path):
+        """yt-dlp writes the YouTube channel name into TPE1 when a video
+        lacks music metadata; splitting 'Artist - Song' must replace it."""
+        p = tmp_path / "channel.mp3"
         subprocess.run(
             [FFMPEG, "-y", "-f", "lavfi", "-i", "anullsrc=r=44100",
              "-t", "1", "-q:a", "9", str(p)],
             capture_output=True, check=True,
         )
         mp3 = ID3(str(p))
-        mp3.add(TIT2(encoding=3, text=["Wrong Artist - Some Song"]))
+        mp3.add(TIT2(encoding=3, text=["Real Artist - Some Song (Lyrics)"]))
+        mp3.add(TPE1(encoding=3, text=["Some YouTube Channel"]))
+        mp3.save(str(p))
+
+        assert sync_embedded_tags(str(p), [*self.TAGS, "Lyrics"]) is True
+
+        f = MutagenFile(str(p))
+        assert str(f.tags["TIT2"].text[0]) == "Some Song"
+        assert str(f.tags["TPE1"].text[0]) == "Real Artist"
+
+    def test_matching_artist_is_noop_for_artist_tag(self, tmp_path):
+        p = tmp_path / "same.mp3"
+        subprocess.run(
+            [FFMPEG, "-y", "-f", "lavfi", "-i", "anullsrc=r=44100",
+             "-t", "1", "-q:a", "9", str(p)],
+            capture_output=True, check=True,
+        )
+        mp3 = ID3(str(p))
+        mp3.add(TIT2(encoding=3, text=["Real Artist - Some Song"]))
         mp3.add(TPE1(encoding=3, text=["Real Artist"]))
         mp3.save(str(p))
 
@@ -220,6 +240,7 @@ class TestSyncEmbeddedTags:
         f = MutagenFile(str(p))
         assert str(f.tags["TIT2"].text[0]) == "Some Song"
         assert str(f.tags["TPE1"].text[0]) == "Real Artist"
+        assert sync_embedded_tags(str(p), self.TAGS) is False
 
     def test_m4a_artist_split(self, tmp_path):
         p = _make_m4a(tmp_path / "split.m4a")
@@ -307,6 +328,23 @@ class TestSyncEmbeddedTags:
 
     def test_missing_file_returns_false(self, tmp_path):
         assert sync_embedded_tags(tmp_path / "nope.mp3", self.TAGS) is False
+
+    def test_youtube_generic_genre_is_removed_real_genre_kept(self, tmp_path):
+        p_yt = _make_mp3(tmp_path / "yt_genre.mp3")
+        mp3 = ID3(p_yt)
+        mp3.add(TCON(encoding=3, text=["People & Blogs"]))
+        mp3.save(p_yt)
+
+        assert sync_embedded_tags(p_yt, self.TAGS) is True
+        assert "TCON" not in MutagenFile(p_yt).tags
+
+        p_real = _make_m4a(tmp_path / "real_genre.m4a")
+        m4a = MP4(p_real)
+        m4a.tags["\xa9gen"] = ["Synthwave"]
+        m4a.save(p_real)
+
+        sync_embedded_tags(p_real, self.TAGS)
+        assert MutagenFile(p_real).tags["\xa9gen"] == ["Synthwave"]
 
 
 # -- rename_with_cleanup integration -----------------------------------------

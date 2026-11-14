@@ -10,9 +10,16 @@ async function queueUrl(url) {
     browser.runtime.openOptionsPage();
     return;
   }
-  const endpoint = `http://127.0.0.1:${port}/queue?url=${encodeURIComponent(url)}&token=${encodeURIComponent(token)}`;
+  const endpoint = `http://127.0.0.1:${port}/queue`;
   try {
-    const res = await fetch(endpoint);
+    const res = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
+      },
+      body: JSON.stringify({ url })
+    });
     const data = await res.json();
     if (data && data.ok) {
       browser.notifications.create({
