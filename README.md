@@ -29,7 +29,7 @@ Go to the [Releases page](https://github.com/chrisnov-it/Chrisnov-Media-Toolkit/
 **Windows**
 1. Right-click the `.zip` → **Extract All…** → choose a folder → **Extract**.
 2. Open that folder and **double-click** the `.exe` inside.
-3. If Windows shows *“Windows protected your PC”*: click **More info** → **Run anyway**. This is normal for unsigned beta builds. The app is safe to use.
+3. If Windows shows *“Windows protected your PC”*: click **More info** → **Run anyway**. This is normal for unsigned builds without a paid code-signing certificate. The app is safe to use.
 
 **macOS**
 1. Download the correct `.zip` for your Mac and double-click it to extract **Chrisnov Media Toolkit.app**.
@@ -118,15 +118,15 @@ python3 -m venv .venv
 - **Container**: `mp4`/`mkv`/`webm` for video; `mp3`/`m4a`/`opus` for audio.
 - **Clean title**: strips tags like “Official Music Video”, “Video Lirik”, etc. from filenames. Add your own tags (comma-separated) in the box.
 - **Browse / Open**: choose the output folder / open it in your file manager.
-- **Embed metadata & thumbnail**: writes title/artist tags; can embed cover art (mp3, m4a, mp4, mkv). Thumbnail is off by default.
+- **Embed metadata & thumbnail**: metadata embedding is on by default (and automatically cleans up title/artist splits, year, description, URL comments, and generic YouTube genres); cover art embedding supports `mp3`, `m4a`, `opus`, `mp4`, and `mkv` (off by default).
 - **Use browser cookies / Cookie file…**: for private or age-restricted content (Instagram private, Vimeo limited). See FAQ.
 - **Skip duplicates**: defaults on, skips things you already downloaded (great for resuming a stopped batch).
 - **Playlists**: paste a playlist URL (YouTube/Vimeo/Dailymotion); large playlists (>50 entries) ask for confirmation with a size estimate.
 - **Batch queue**: add many URLs and download them one after another; cancel mid-batch anytime.
-- **History**: search/filter past downloads by name or URL, and by type. Double-click a ✅ to open the folder, or a ❌ to re-download.
+- **History**: search/filter past downloads by name, URL, type, or status. Double-click a completed item to open its folder, or a failed/missing item to re-download (right-click for more actions).
 
 ### Audio Converter tab
-Convert local audio files, or pull the audio out of local videos, to **mp3, m4a, opus, flac, or wav**. Options: bitrate, sample rate, loudness normalization (EBU R128), trim silence, and **Folder** to batch a whole album. The progress bar shows a live ETA while converting.
+Convert local audio files, or pull the audio out of local videos, to **mp3, m4a, opus, flac, or wav**. Options: bitrate, sample rate, loudness normalization (EBU R128), trim silence, per-file **Tags** editor, and **Folder** to batch a whole album. The progress bar shows a live ETA while converting.
 
 ### Video Converter tab
 Convert local videos to **mp4, mkv, or webm**. Quality presets: **Keep quality / Balanced / Smaller file**. **Copy audio** (on by default) keeps your existing audio track when the container supports it; uncheck it to re-encode the audio. The progress bar shows a live ETA while converting.
@@ -184,7 +184,7 @@ The app remembers the last output folder you chose for each mode. The defaults a
 - One exception: opening the **About** dialog checks PyPI once in the background to see if a newer yt-dlp exists (shows an update notice only when one is actually newer). No personal data is sent.
 
 **Q: Unsigned/“recognized developer” warnings on macOS?**
-- Expected for beta builds without a paid code‑signing certificate. Right‑click → **Open** to run; the app is safe.
+- Expected for builds without a paid Apple code‑signing certificate. Right‑click → **Open** to run; the app is safe.
 
 ---
 
@@ -218,7 +218,7 @@ Panduan lengkap dalam Bahasa Indonesia tersedia di [blog kami](https://chrisnov.
 | Unduh konten private (Instagram/Vimeo) | Centang **Use browser cookies** atau pilih cookie file |
 | Lanjutkan unduhan yang sempat dibatalkan | Klik Start lagi, yang sudah diunduh otomatis dilewati |
 | Lihat riwayat unduhan | Buka tab **History**, cari/filter berdasarkan nama atau tipe file |
-| Buka folder file yang pernah diunduh | Tab **History**, double-click item yang statusnya ✅ |
-| Download ulang file yang gagal | Tab **History**, double-click item yang statusnya ❌ |
+| Buka folder file yang pernah diunduh | Tab **History**, double-click item yang sudah selesai |
+| Download ulang file yang gagal | Tab **History**, double-click item yang gagal (atau klik kanan) |
 | Ubah folder tujuan | Klik **Browse...** di samping kolom Output folder |
 | Convert satu folder album | Buka **Audio Converter**, klik **Folder**, pilih output, klik Convert |

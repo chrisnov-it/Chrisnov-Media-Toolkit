@@ -35,6 +35,7 @@ Runtime libraries are pinned in `requirements.txt` and embedded by PyInstaller:
 | PySide6 (Qt for Python) | LGPLv3 (Qt) / LGPLv3 for the bindings |
 | yt-dlp | Unlicense |
 | curl_cffi | MIT |
+| mutagen | GPL-2.0-or-later |
 
 `requirements-dev.txt` adds pytest (MIT), ruff (MIT), and PyInstaller (GPL with
 an exception that permits building and distributing non-free/other-licensed

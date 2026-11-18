@@ -53,14 +53,20 @@ Chrisnov-Media-Toolkit/
 │   ├── video_convert_tab.py # Video converter tab
 │   ├── history.py        # DownloadHistory — Qt-free versioned-JSON model
 │   ├── history_tab.py    # History tab (list/search/re-queue)
+│   ├── http_api.py       # LocalApiServer — optional localhost helper API (127.0.0.1)
 │   ├── progress.py       # EtaEstimator — wall-clock ETA over worker progress
 │   ├── update_check.py   # UpdateCheckWorker — background yt-dlp release check
 │   ├── settings.py       # AppSettings — typed QSettings wrapper
+│   ├── tags.py           # sync_embedded_tags / plan_tag_repairs (mutagen)
 │   ├── theme.py          # Palette-aware stylesheets (Light/Dark Mode)
 │   ├── icon.py           # Bundled palette-aware SVG tab icons + queue status icons
 │   ├── utils.py          # open_in_explorer + bounded folder scan (scan_media_files)
 │   ├── window.py         # MainWindow — thin shell (tabs, drag-drop, About)
 │   └── worker_tracking.py # WorkerTracker — pins QThreads until deferred delete
+├── browser-extension/    # Companion Firefox extension for LocalApiServer
+├── scripts/
+│   ├── repair_tags.py    # One-off CLI tag repair for older downloads
+│   └── smoke_gui.py      # Offscreen GUI smoke test
 └── .venv/                # Python venv (pinned deps from requirements-dev.txt)
 ```
 
@@ -70,7 +76,7 @@ Chrisnov-Media-Toolkit/
 - **`ffmpeg_utils.py`** — centralizes FFmpeg ops: `find_ffmpeg()`/`find_ffprobe()` (PyInstaller → local → PATH), `probe_duration()`/`probe_loudness()`, `resolve_output_path()`, `run_ffmpeg_with_progress()` (progress parsing, cancellation, range mapping).
 
 ## Architecture
-GUI runs in the main thread; downloads happen in `DownloadWorker` (a `QThread`) so the UI stays responsive. The worker uses yt-dlp's Python API directly (`YoutubeDL.extract_info(download=True)`), passing `download_archive` for de‑duplication, `progress_hooks` for live status, `impersonate` for browser mimicry, and cookie options for authenticated content. After each download, `DownloadTab._on_item_ok` applies title cleanup on disk. Local conversion uses FFmpeg via `ConvertWorker`/`VideoConvertWorker`, which parse `ffmpeg -progress` for live progress (surfaced with a wall-clock ETA by `EtaEstimator` in the converter tabs) and terminate the FFmpeg subprocess on Cancel. Playlists >50 entries trigger a dry `extract_info` count and a confirmation dialog. The About dialog checks PyPI for a newer yt-dlp in `UpdateCheckWorker`, off the GUI thread.
+GUI runs in the main thread; downloads happen in `DownloadWorker` (a `QThread`) so the UI stays responsive. The worker uses yt-dlp's Python API directly (`YoutubeDL.extract_info(download=True)`), passing `download_archive` for de‑duplication, `progress_hooks` for live status, `impersonate` for browser mimicry, and cookie options for authenticated content. After each download, `DownloadTab._on_item_ok` applies title cleanup on disk and `tags.sync_embedded_tags()` repairs embedded metadata (title/artist split, year normalization, description/URL comment/generic-genre cleanup via `mutagen`). Local conversion uses FFmpeg via `ConvertWorker`/`VideoConvertWorker`, which parse `ffmpeg -progress` for live progress (surfaced with a wall-clock ETA by `EtaEstimator` in the converter tabs) and terminate the FFmpeg subprocess on Cancel. Playlists >50 entries trigger a dry `extract_info` count and a confirmation dialog. The About dialog checks PyPI for a newer yt-dlp in `UpdateCheckWorker`, off the GUI thread. `http_api.LocalApiServer` exposes a token-protected `127.0.0.1` `POST /queue` endpoint for the optional companion browser extension.
 
 ## Notes
 - Skip‑duplicates archive: `~/.config/chrisnov-media-toolkit/archive_audio.txt` (or `archive_video.txt`). Delete these to re‑download from scratch.
